@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------ *
- * Exports for Iteration 1:
+ * Template exports:
  *   - pattern PNG (grid / numbers / mirror toggles)
  *   - overview sheet (thumbnail + full legend) as PNG and PDF
  *   - tiled 1:1 PDF across A4 with overlap + registration marks

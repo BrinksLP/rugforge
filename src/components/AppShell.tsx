@@ -37,7 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             ))}
           </nav>
           <div className="ml-auto text-xs text-ink-soft">
-            Iteration 1 · Muster für grafische Motive
+            Iteration 2 · Fotos & automatische Freistellung
           </div>
         </div>
       </header>

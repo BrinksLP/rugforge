@@ -56,6 +56,16 @@ export const PRESETS: Record<PatternPreset, Omit<PatternSettings, 'preset'>> = {
   detailed: { colorCount: 10, minRegionStitches: 3, smoothing: 0 },
 }
 
+/* ---- geometry ----------------------------------------------------- */
+
+/** a rectangle in original-image pixel coords */
+export interface Crop {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 /* ---- size / grid --------------------------------------------------- */
 
 export interface RugSize {
@@ -119,7 +129,7 @@ export interface Project {
   /** original upload as a data URL */
   imageDataUrl: string | null
   /** crop box in original-image pixel coords */
-  crop: { x: number; y: number; w: number; h: number } | null
+  crop: Crop | null
   size: RugSize
   settings: PatternSettings
   /** recolour overrides: regionId -> paletteIndex */

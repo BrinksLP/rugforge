@@ -4,12 +4,16 @@ Ein Windows-Desktop-Werkzeug für Tufting-Teppichmacher: Bild hochladen →
 tufting-taugliche Farbflächen-Vorlage, plus (später) Garn-, Material-, Kosten-
 und Preisrechner.
 
-**Status:** Iteration 1 — Muster für grafische Motive.
+**Status:** Iteration 2 — Fotos: automatische Freistellung.
 
 - Bild → Freistellen → Größe → Vorlage → Export
 - Bildpipeline läuft komplett offline im Browser (Canvas): Downscale aufs
   Stichraster → LAB-k-Means-Farbreduktion (≤10) → Kleinflächen-Bereinigung →
   Kantenglättung → Vorlage + Legende
+- Freistellen: automatische Hintergrund-Entfernung per u2netp (~4,6 MB ONNX)
+  über `onnxruntime-web`, single-thread WASM+SIMD — Modell und Runtime werden
+  lokal aus `public/models/` bzw. `public/` mitgeliefert, kein CDN. Danach
+  Pinsel-Korrektur.
 - Export: Vorlage-PNG, Übersichtsblatt (PNG/PDF), gekachelte 1:1-A4-PDF,
   `.rugforge.json`-Projektdatei
 - Speicherung: IndexedDB, Autosave + manueller Speicherpunkt
@@ -31,8 +35,8 @@ Basis-Pfad auf `/rugforge/`.
 
 ## Roadmap
 
-1. **Muster für grafische Motive** ← aktuell
-2. Fotos — Offline-ONNX-Segmentierung, Auto-Maske + Pinsel
+1. ~~Muster für grafische Motive~~ ✓
+2. **Fotos — Offline-ONNX-Segmentierung, Auto-Maske + Pinsel** ← aktuell
 3. Tufting-Pfad — Umrandung + Serpentinen-Füllung, Farbreihenfolge
 4. Rechner — Material, Kosten, Preis, Szenarien; Kalibriertest
 5. Politur — Electron-Packaging, Auto-Update, Fehlerbehandlung, README

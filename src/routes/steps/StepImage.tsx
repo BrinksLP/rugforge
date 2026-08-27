@@ -63,8 +63,9 @@ export function StepImage() {
           <div className="text-4xl">🖼️</div>
           <p className="mt-3 text-lg font-semibold">Bild hierher ziehen</p>
           <p className="mt-1 text-sm text-ink-soft">
-            PNG oder JPG. Am besten ein grafisches Motiv — Logo, Illustration,
-            klare Flächen.
+            PNG oder JPG. Grafische Motive geben die saubersten Vorlagen; Fotos
+            gehen auch — im nächsten Schritt wird der Hintergrund automatisch
+            freigestellt.
           </p>
           <div className="mt-5">
             <Button onClick={() => inputRef.current?.click()}>Bild auswählen</Button>
@@ -114,10 +115,12 @@ export function StepImage() {
         <ul className="mt-2 space-y-1 text-sm text-ink-soft">
           <li>• Grafiken mit klaren Farbflächen</li>
           <li>• Logos, Schriftzüge, Illustrationen</li>
+          <li>• Fotos mit einem klaren Hauptmotiv</li>
         </ul>
-        <h3 className="mt-4 text-sm font-bold">Noch nicht</h3>
+        <h3 className="mt-4 text-sm font-bold">Schwieriger</h3>
         <ul className="mt-2 space-y-1 text-sm text-ink-soft">
-          <li>• Fotos (kommt in Iteration 2)</li>
+          <li>• Wimmelbilder ohne klares Motiv</li>
+          <li>• sehr feine Farbverläufe</li>
         </ul>
       </Card>
     </div>

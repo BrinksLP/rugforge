@@ -9,8 +9,10 @@
  *     -> small-area cleanup (merge islands into largest neighbour)
  *     -> palette + region list
  *
- * Honest limitation: the automatic result is only good for graphic
- * motifs. Photos need Iteration 2 (segmentation) + manual tools.
+ * The automatic colour reduction is happiest with graphic motifs.
+ * Photos work once their background is removed in the Freistellen step
+ * (offline u2netp segmentation, see lib/segmentation.ts) and the palette
+ * is nudged down.
  * ------------------------------------------------------------------ */
 
 import { labToHex, rgbToLab, type Lab } from './color'

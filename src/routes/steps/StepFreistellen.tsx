@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Field } from '../../components/ui'
 import { useEditor } from '../../store/editorStore'
+import { loadSegmentationModel, segmentForeground } from '../../lib/segmentation'
 
 type Handle = 'move' | 'nw' | 'ne' | 'sw' | 'se' | null
 
@@ -13,10 +14,21 @@ export function StepFreistellen() {
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const maskRef = useRef<HTMLCanvasElement | null>(null)
+  const dragRef = useRef<{
+    h: Handle
+    startX: number
+    startY: number
+    box: { x: number; y: number; w: number; h: number }
+  } | null>(null)
+  const painting = useRef(false)
   const [brush, setBrush] = useState(false)
   const [erase, setErase] = useState(true)
   const [brushSize, setBrushSize] = useState(40)
   const [, force] = useState(0)
+
+  const [segBusy, setSegBusy] = useState<null | 'loading' | 'running'>(null)
+  const [segError, setSegError] = useState<string | null>(null)
+  const [threshold, setThreshold] = useState(0.5)
 
   const natural = img
     ? { w: img.naturalWidth, h: img.naturalHeight }
@@ -37,6 +49,7 @@ export function StepFreistellen() {
     ctx.fillStyle = '#fff'
     ctx.fillRect(0, 0, c.width, c.height)
     maskRef.current = c
+    setSegError(null)
     force((n) => n + 1)
   }, [img])
 
@@ -61,9 +74,6 @@ export function StepFreistellen() {
   }
 
   /* ---- crop dragging ---- */
-  const dragRef = useRef<{ h: Handle; startX: number; startY: number; box: typeof box } | null>(
-    null,
-  )
   function onCropPointerDown(h: Handle, e: React.PointerEvent) {
     if (brush) return
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -103,7 +113,6 @@ export function StepFreistellen() {
   }
 
   /* ---- brush ---- */
-  const painting = useRef(false)
   function paintAt(clientX: number, clientY: number) {
     const c = maskRef.current
     if (!c) return
@@ -117,6 +126,46 @@ export function StepFreistellen() {
     ctx.globalCompositeOperation = 'source-over'
     setMask(c)
     force((n) => n + 1)
+  }
+
+  function resetMask() {
+    const c = maskRef.current
+    if (!c) return
+    const ctx = c.getContext('2d')!
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, c.width, c.height)
+    setMask(c)
+    setSegError(null)
+    force((n) => n + 1)
+  }
+
+  async function autoMask() {
+    if (!img || segBusy) return
+    setSegError(null)
+    try {
+      setSegBusy('loading')
+      await loadSegmentationModel()
+      setSegBusy('running')
+      const result = await segmentForeground(img, crop ?? null, { threshold })
+      const c = maskRef.current
+      if (!c) return
+      const ctx = c.getContext('2d')!
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.clearRect(0, 0, c.width, c.height)
+      ctx.drawImage(result, 0, 0)
+      setMask(c)
+      setBrush(true)
+      force((n) => n + 1)
+    } catch (e) {
+      console.error('auto mask failed', e)
+      setSegError(
+        'Automatische Freistellung fehlgeschlagen. Modell konnte nicht geladen ' +
+          'oder ausgeführt werden — du kannst die Maske von Hand pinseln.',
+      )
+    } finally {
+      setSegBusy(null)
+    }
   }
 
   function bakeFromAlpha() {
@@ -141,6 +190,13 @@ export function StepFreistellen() {
     setMask(c)
     force((n) => n + 1)
   }
+
+  const segLabel =
+    segBusy === 'loading'
+      ? 'Modell wird geladen …'
+      : segBusy === 'running'
+        ? 'Wird freigestellt …'
+        : 'Automatisch freistellen'
 
   return (
     <div className="grid gap-6 md:grid-cols-[1fr_300px]">
@@ -234,13 +290,46 @@ export function StepFreistellen() {
 
         <hr className="my-4 border-line" />
 
+        <h3 className="text-sm font-bold">Hintergrund entfernen</h3>
+        <p className="mt-1 text-sm text-ink-soft">
+          Stellt das Motiv im gewählten Rahmen automatisch frei. Läuft komplett
+          offline; der erste Aufruf lädt einmalig ein ~5 MB Modell.
+        </p>
+        <div className="mt-3 space-y-3">
+          <Button onClick={autoMask} disabled={!!segBusy}>
+            {segLabel}
+          </Button>
+          <Field label={`Feinheit des Schnitts: ${threshold.toFixed(2)}`}>
+            <input
+              type="range"
+              min={0.3}
+              max={0.7}
+              step={0.05}
+              value={threshold}
+              disabled={!!segBusy}
+              onChange={(e) => setThreshold(+e.target.value)}
+            />
+          </Field>
+          <p className="text-xs text-ink-soft">
+            Höher = enger am Motiv, mehr Hintergrund weg. Danach mit dem Pinsel
+            nachbessern.
+          </p>
+          {segError ? (
+            <p className="rounded-[8px] bg-warn/15 px-3 py-2 text-xs text-warn">
+              {segError}
+            </p>
+          ) : null}
+        </div>
+
+        <hr className="my-4 border-line" />
+
         <label className="flex items-center gap-2 text-sm font-medium">
           <input
             type="checkbox"
             checked={brush}
             onChange={(e) => setBrush(e.target.checked)}
           />
-          Maske bearbeiten (Hintergrund wegpinseln)
+          Maske von Hand bearbeiten
         </label>
 
         {brush ? (
@@ -273,6 +362,11 @@ export function StepFreistellen() {
             </Button>
           </div>
         ) : null}
+
+        <hr className="my-4 border-line" />
+        <Button variant="ghost" onClick={resetMask}>
+          Maske zurücksetzen
+        </Button>
       </Card>
     </div>
   )
