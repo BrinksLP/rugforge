@@ -9,13 +9,16 @@ import type { Pattern, PatternPreset, Project, RugSize } from '../types'
 import { PRESETS } from '../types'
 import { STANDARD_BUSINESS, STANDARD_SETUP, id } from '../lib/profiles'
 import { gridResolution, cellSizeMm } from '../lib/calc'
-import { buildPattern } from '../lib/pattern'
+import { buildPattern, resolveMergedColor } from '../lib/pattern'
 import { saveProject } from '../lib/db'
 
 export const STEPS = ['Bild', 'Freistellen', 'Größe', 'Vorlage', 'Export'] as const
 export type StepKey = (typeof STEPS)[number]
 
-type Snapshot = Pick<Project, 'crop' | 'size' | 'settings' | 'recolors'>
+type Snapshot = Pick<
+  Project,
+  'crop' | 'size' | 'settings' | 'recolors' | 'colorMerges'
+>
 
 function snap(p: Project): Snapshot {
   return {
@@ -23,6 +26,7 @@ function snap(p: Project): Snapshot {
     size: { ...p.size },
     settings: { ...p.settings },
     recolors: { ...p.recolors },
+    colorMerges: { ...p.colorMerges },
   }
 }
 
@@ -37,6 +41,7 @@ export function newProject(now: number): Project {
     size: { widthCm: 80, heightCm: 120, stitchesPerCm: 2 },
     settings: { preset: 'medium', ...PRESETS.medium },
     recolors: {},
+    colorMerges: {},
     setupProfile: { ...STANDARD_SETUP },
     businessProfile: { ...STANDARD_BUSINESS },
     version: 1,
@@ -79,6 +84,8 @@ interface EditorState {
   setBusinessProfile: (patch: Partial<Project['businessProfile']>) => void
   recolor: (regionId: number, paletteIndex: number) => void
   clearRecolor: (regionId: number) => void
+  mergeColors: (from: number, into: number) => void
+  unmergeColor: (index: number) => void
   recompute: () => Promise<void>
   undo: () => void
   redo: () => void
@@ -106,7 +113,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   load: (p) =>
     set({
-      project: p,
+      project: { ...p, colorMerges: p.colorMerges ?? {} },
       step: 0,
       maxStepReached: p.imageDataUrl ? 4 : 0,
       pattern: null,
@@ -144,7 +151,13 @@ export const useEditor = create<EditorState>((set, get) => ({
   setImage: (dataUrl, img) =>
     set((s) => ({
       ...pushHistory(s),
-      project: { ...s.project, imageDataUrl: dataUrl, crop: null, recolors: {} },
+      project: {
+        ...s.project,
+        imageDataUrl: dataUrl,
+        crop: null,
+        recolors: {},
+        colorMerges: {},
+      },
       sourceImage: img,
       mask: null,
       pattern: null,
@@ -174,6 +187,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       project: {
         ...s.project,
         settings: { preset, ...PRESETS[preset] },
+        // palette gets rebuilt with a different colour count -> old merges
+        // would point at the wrong swatches
+        colorMerges: {},
       },
       patternStale: true,
     })),
@@ -184,6 +200,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       project: {
         ...s.project,
         settings: { ...s.project.settings, [key]: value },
+        colorMerges:
+          key === 'colorCount' ? {} : s.project.colorMerges,
       },
       patternStale: true,
     })),
@@ -221,6 +239,29 @@ export const useEditor = create<EditorState>((set, get) => ({
       return { ...pushHistory(s), project: { ...s.project, recolors: next } }
     }),
 
+  mergeColors: (from, into) =>
+    set((s) => {
+      if (from === into) return {}
+      const merges = s.project.colorMerges ?? {}
+      const root = resolveMergedColor(into, merges)
+      if (root === from) return {} // don't close a loop
+      // point `from`, plus anything already pointing at `from`, at the root
+      const next: Record<number, number> = { [from]: root }
+      for (const [k, v] of Object.entries(merges)) {
+        next[+k] = v === from ? root : v
+      }
+      return { ...pushHistory(s), project: { ...s.project, colorMerges: next } }
+    }),
+
+  unmergeColor: (index) =>
+    set((s) => {
+      const merges = s.project.colorMerges ?? {}
+      if (merges[index] == null) return {}
+      const next = { ...merges }
+      delete next[index]
+      return { ...pushHistory(s), project: { ...s.project, colorMerges: next } }
+    }),
+
   recompute: async () => {
     const { sourceImage, project, mask } = get()
     if (!sourceImage) return
@@ -237,7 +278,23 @@ export const useEditor = create<EditorState>((set, get) => ({
         cellSizeMm: cellSizeMm(project.size.stitchesPerCm),
         settings: project.settings,
       })
-      set({ pattern, patternStale: false, computing: false })
+      // drop any merges that no longer fit the rebuilt palette
+      const merges = project.colorMerges ?? {}
+      const pruned: Record<number, number> = {}
+      for (const [k, v] of Object.entries(merges)) {
+        if (+k < pattern.palette.length && v < pattern.palette.length)
+          pruned[+k] = v
+      }
+      const mergesChanged =
+        Object.keys(pruned).length !== Object.keys(merges).length
+      set({
+        pattern,
+        patternStale: false,
+        computing: false,
+        ...(mergesChanged
+          ? { project: { ...get().project, colorMerges: pruned } }
+          : {}),
+      })
     } catch (e) {
       console.error('pattern build failed', e)
       set({ computing: false })

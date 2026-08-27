@@ -8,7 +8,7 @@
 
 import { jsPDF } from 'jspdf'
 import { renderToCanvas, type RenderOpts } from './render'
-import { areaByColor } from './pattern'
+import { areaByColor, resolveMergedColor } from './pattern'
 import { yarnEstimate } from './calc'
 import type { Pattern, Project } from '../types'
 
@@ -30,7 +30,7 @@ const slug = (s: string) =>
 export function exportPatternPng(
   pattern: Pattern,
   project: Project,
-  opts: Omit<RenderOpts, 'cellPx' | 'recolors'> & { cellPx?: number },
+  opts: Omit<RenderOpts, 'cellPx' | 'recolors' | 'merges'> & { cellPx?: number },
 ) {
   const cellPx = opts.cellPx ?? 22
   const cv = renderToCanvas(pattern, {
@@ -39,6 +39,7 @@ export function exportPatternPng(
     showNumbers: opts.showNumbers,
     mirror: opts.mirror,
     recolors: project.recolors,
+    merges: project.colorMerges,
     highlight: null,
   })
   triggerDownload(cv.toDataURL('image/png'), `${slug(project.name)}-vorlage.png`)
@@ -56,19 +57,23 @@ export interface LegendRow {
 
 export function legendRows(pattern: Pattern, project: Project): LegendRow[] {
   const cellCm = pattern.cellSizeMm / 10
-  const areas = areaByColor(pattern, project.recolors)
-  return pattern.palette.map((c) => {
-    const stitches = areas[c.index] ?? 0
-    const areaCm2 = stitches * cellCm * cellCm
-    const { weightG } = yarnEstimate({ areaCm2, setup: project.setupProfile })
-    return {
-      no: c.index + 1,
-      hex: c.hex,
-      stitches,
-      areaCm2,
-      yarnG: weightG,
-    }
-  })
+  const merges = project.colorMerges ?? {}
+  const areas = areaByColor(pattern, project.recolors, merges)
+  return pattern.palette
+    // drop swatches that were merged into another colour
+    .filter((c) => resolveMergedColor(c.index, merges) === c.index)
+    .map((c) => {
+      const stitches = areas[c.index] ?? 0
+      const areaCm2 = stitches * cellCm * cellCm
+      const { weightG } = yarnEstimate({ areaCm2, setup: project.setupProfile })
+      return {
+        no: c.index + 1,
+        hex: c.hex,
+        stitches,
+        areaCm2,
+        yarnG: weightG,
+      }
+    })
 }
 
 /* ---- overview sheet ---------------------------------------- */
@@ -92,8 +97,9 @@ function drawOverview(
   ctx.font = "22px 'Inter', sans-serif"
   ctx.fillStyle = '#5b6470'
   const { widthCm, heightCm, stitchesPerCm } = project.size
+  const colorCount = legendRows(pattern, project).length
   ctx.fillText(
-    `${widthCm} × ${heightCm} cm  ·  ${stitchesPerCm} Stiche/cm  ·  ${pattern.cols} × ${pattern.rows} Stiche  ·  ${pattern.palette.length} Farben`,
+    `${widthCm} × ${heightCm} cm  ·  ${stitchesPerCm} Stiche/cm  ·  ${pattern.cols} × ${pattern.rows} Stiche  ·  ${colorCount} Farben`,
     60,
     128,
   )
@@ -110,6 +116,7 @@ function drawOverview(
     showNumbers: false,
     mirror: false,
     recolors: project.recolors,
+    merges: project.colorMerges,
     highlight: null,
   })
   const maxW = W - 120
@@ -206,6 +213,7 @@ export function exportTiledPdf(
     showNumbers: opts.showNumbers,
     mirror: opts.mirror,
     recolors: project.recolors,
+    merges: project.colorMerges,
     highlight: null,
   })
   const fullPxPerMm = cellPx / cellMm

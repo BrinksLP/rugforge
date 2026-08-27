@@ -368,14 +368,29 @@ export function buildPattern(input: BuildInput): Pattern {
 
 /* ---- derived helpers (region vs colour) ---------------------- */
 
-/** stitch count per palette colour, honouring recolour overrides */
+/** follow a palette merge chain to the colour it ultimately resolves to */
+export function resolveMergedColor(
+  index: number,
+  merges: Record<number, number> = {},
+): number {
+  let i = index
+  const seen = new Set<number>()
+  while (merges[i] != null && merges[i] !== i && !seen.has(i)) {
+    seen.add(i)
+    i = merges[i]
+  }
+  return i
+}
+
+/** stitch count per palette colour, honouring recolours + merges */
 export function areaByColor(
   pattern: Pattern,
   recolors: Record<number, number>,
+  merges: Record<number, number> = {},
 ): number[] {
   const out = new Array(pattern.palette.length).fill(0)
   for (const r of pattern.regions) {
-    const ci = recolors[r.id] ?? r.colorIndex
+    const ci = effectiveColorIndex(r, recolors, merges)
     out[ci] = (out[ci] ?? 0) + r.cellCount
   }
   return out
@@ -384,6 +399,7 @@ export function areaByColor(
 export function effectiveColorIndex(
   region: Region,
   recolors: Record<number, number>,
+  merges: Record<number, number> = {},
 ): number {
-  return recolors[region.id] ?? region.colorIndex
+  return resolveMergedColor(recolors[region.id] ?? region.colorIndex, merges)
 }

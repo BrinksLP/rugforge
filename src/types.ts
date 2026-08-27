@@ -134,6 +134,12 @@ export interface Project {
   settings: PatternSettings
   /** recolour overrides: regionId -> paletteIndex */
   recolors: Record<number, number>
+  /**
+   * palette merges: paletteIndex -> paletteIndex it is folded into.
+   * Lets you quantise at a high colour count for clean edges, then
+   * collapse near-duplicate swatches into one yarn. Chains are followed.
+   */
+  colorMerges: Record<number, number>
   setupProfile: SetupProfile
   businessProfile: BusinessProfile
   /** schema version for future migrations */

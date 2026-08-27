@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Field, Info } from '../../components/ui'
 import { useEditor } from '../../store/editorStore'
 import { drawPattern } from '../../lib/render'
-import { areaByColor } from '../../lib/pattern'
+import { areaByColor, resolveMergedColor } from '../../lib/pattern'
 import type { PatternPreset } from '../../types'
 
 const PRESET_LABEL: Record<PatternPreset, string> = {
@@ -21,6 +21,8 @@ export function StepPattern() {
   const setSetting = useEditor((s) => s.setSetting)
   const recolor = useEditor((s) => s.recolor)
   const clearRecolor = useEditor((s) => s.clearRecolor)
+  const mergeColors = useEditor((s) => s.mergeColors)
+  const unmergeColor = useEditor((s) => s.unmergeColor)
   const goStep = useEditor((s) => s.goStep)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -41,9 +43,33 @@ export function StepPattern() {
     [pattern],
   )
 
+  const merges = useMemo(
+    () => project.colorMerges ?? {},
+    [project.colorMerges],
+  )
+
   const areas = useMemo(
-    () => (pattern ? areaByColor(pattern, project.recolors) : []),
-    [pattern, project.recolors],
+    () => (pattern ? areaByColor(pattern, project.recolors, merges) : []),
+    [pattern, project.recolors, merges],
+  )
+
+  const activePalette = useMemo(
+    () =>
+      pattern
+        ? pattern.palette.filter(
+            (c) => resolveMergedColor(c.index, merges) === c.index,
+          )
+        : [],
+    [pattern, merges],
+  )
+  const mergedPalette = useMemo(
+    () =>
+      pattern
+        ? pattern.palette.filter(
+            (c) => resolveMergedColor(c.index, merges) !== c.index,
+          )
+        : [],
+    [pattern, merges],
   )
 
   // draw
@@ -62,9 +88,10 @@ export function StepPattern() {
       showNumbers: cellPx >= 12,
       mirror,
       recolors: project.recolors,
+      merges,
       highlight,
     })
-  }, [pattern, showGrid, mirror, highlight, project.recolors])
+  }, [pattern, showGrid, mirror, highlight, project.recolors, merges])
 
   function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!pattern) return
@@ -144,8 +171,9 @@ export function StepPattern() {
         {pattern ? (
           <p className="mt-2 text-xs text-ink-soft">
             {pattern.cols} × {pattern.rows} Stiche · {pattern.regions.length}{' '}
-            Flächen · {pattern.palette.length} Farben. Klicke eine Fläche an, um
-            sie umzufärben.
+            Flächen · {activePalette.length} Farben
+            {mergedPalette.length ? ` (${mergedPalette.length} verschmolzen)` : ''}.
+            Klicke eine Fläche an, um sie umzufärben.
           </p>
         ) : null}
       </Card>
@@ -217,7 +245,8 @@ export function StepPattern() {
         <Card className="p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold">
-              Farblegende <Info text="Klick auf eine Farbe hebt ihre Flächen hervor." />
+              Farblegende{' '}
+              <Info text="Klick auf eine Farbe hebt ihre Flächen hervor — dann kannst du sie mit einer anderen verschmelzen." />
             </h3>
             {highlight != null ? (
               <button
@@ -229,17 +258,16 @@ export function StepPattern() {
             ) : null}
           </div>
           <ul className="mt-3 space-y-1.5">
-            {pattern?.palette.map((c) => {
+            {activePalette.map((c) => {
               const stitches = areas[c.index] ?? 0
               const cm2 = stitches * cellCm * cellCm
+              const selected = highlight === c.index
               return (
                 <li key={c.index}>
                   <button
-                    onClick={() =>
-                      setHighlight(highlight === c.index ? null : c.index)
-                    }
+                    onClick={() => setHighlight(selected ? null : c.index)}
                     className={`flex w-full items-center gap-3 rounded-[8px] px-2 py-1.5 text-left text-sm transition ${
-                      highlight === c.index ? 'bg-accent-soft' : 'hover:bg-canvas'
+                      selected ? 'bg-accent-soft' : 'hover:bg-canvas'
                     }`}
                   >
                     <span
@@ -252,10 +280,77 @@ export function StepPattern() {
                       {cm2.toFixed(0)} cm²
                     </span>
                   </button>
+
+                  {selected && activePalette.length > 1 ? (
+                    <div className="mt-1.5 rounded-[8px] bg-canvas px-2 py-2">
+                      <p className="mb-1.5 text-xs text-ink-soft">
+                        Farbe {c.index + 1} verschmelzen mit:
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {activePalette
+                          .filter((t) => t.index !== c.index)
+                          .map((t) => (
+                            <button
+                              key={t.index}
+                              onClick={() => {
+                                mergeColors(c.index, t.index)
+                                setHighlight(null)
+                              }}
+                              className="flex items-center gap-1 rounded-[6px] border border-line bg-white px-1.5 py-1 text-xs hover:border-accent"
+                              title={`In Farbe ${t.index + 1} verschmelzen`}
+                            >
+                              <span
+                                className="h-4 w-4 rounded-[4px] border border-black/10"
+                                style={{ background: t.hex }}
+                              />
+                              {t.index + 1}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </li>
               )
             })}
           </ul>
+
+          {mergedPalette.length ? (
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="mb-1.5 text-xs font-medium text-ink-soft">
+                Verschmolzen
+              </p>
+              <ul className="space-y-1">
+                {mergedPalette.map((c) => {
+                  const into = resolveMergedColor(c.index, merges)
+                  const target = pattern?.palette[into]
+                  return (
+                    <li
+                      key={c.index}
+                      className="flex items-center gap-2 px-2 text-sm text-ink-soft"
+                    >
+                      <span
+                        className="h-4 w-4 shrink-0 rounded-[4px] border border-black/10 opacity-60"
+                        style={{ background: c.hex }}
+                      />
+                      <span className="line-through">{c.index + 1}</span>
+                      <span aria-hidden>→</span>
+                      <span
+                        className="h-4 w-4 shrink-0 rounded-[4px] border border-black/10"
+                        style={{ background: target?.hex }}
+                      />
+                      <span>{into + 1}</span>
+                      <button
+                        className="ml-auto text-xs text-accent"
+                        onClick={() => unmergeColor(c.index)}
+                      >
+                        lösen
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
         </Card>
 
         {selectedRegion != null && pattern ? (
@@ -275,7 +370,7 @@ export function StepPattern() {
               bleibt, nur die Farbe ändert sich.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {pattern.palette.map((c) => (
+              {activePalette.map((c) => (
                 <button
                   key={c.index}
                   onClick={() => recolor(selectedRegion, c.index)}

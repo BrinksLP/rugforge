@@ -14,6 +14,8 @@ export interface RenderOpts {
   /** tuft-from-the-back: flip horizontally */
   mirror: boolean
   recolors: Record<number, number>
+  /** palette merges: paletteIndex -> paletteIndex it is folded into */
+  merges?: Record<number, number>
   /** palette index to spotlight; others dimmed */
   highlight?: number | null
 }
@@ -27,7 +29,8 @@ export function drawPattern(
   p: Pattern,
   opts: RenderOpts,
 ): void {
-  const { cellPx, showGrid, showNumbers, mirror, recolors, highlight } = opts
+  const { cellPx, showGrid, showNumbers, mirror, recolors, merges, highlight } =
+    opts
   const W = p.cols * cellPx
   const H = p.rows * cellPx
 
@@ -43,7 +46,8 @@ export function drawPattern(
 
   // region-id lookup for effective colour
   const colorOf = new Int32Array(p.regions.length)
-  for (const r of p.regions) colorOf[r.id] = effectiveColorIndex(r, recolors)
+  for (const r of p.regions)
+    colorOf[r.id] = effectiveColorIndex(r, recolors, merges)
 
   for (let y = 0; y < p.rows; y++) {
     for (let x = 0; x < p.cols; x++) {
