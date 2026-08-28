@@ -40,7 +40,15 @@ export interface BuildInput {
  * 70% frame / 30% background becomes solidly "frame" rather than a
  * blend that lands between two centres and flips cell-to-cell along the
  * edge — the ragged-border effect at low colour counts.
+ *
+ * k-means always runs at a FIXED high k (seed depends only on the
+ * sample count, not the target), then centres are agglomeratively
+ * merged down to `k`. So lowering the "Farben" slider *merges the two
+ * closest colours* step by step instead of re-rolling the whole
+ * clustering — the colour count moves monotonically and predictably.
  * ------------------------------------------------------------------ */
+
+const KFIT = 10
 
 function fitPalette(src: ImageData, k: number): Lab[] {
   const { width: sw, height: sh, data } = src
@@ -55,7 +63,54 @@ function fitPalette(src: ImageData, k: number): Lab[] {
     }
   }
   if (samples.length < 3) return [[0, 0, 0]]
-  return kmeansLab(Float64Array.from(samples), k).centers
+
+  const target = Math.max(1, Math.min(KFIT, k))
+  const { centers, assignments } = kmeansLab(Float64Array.from(samples), KFIT)
+  const pop = new Array(centers.length).fill(0)
+  for (const a of assignments) pop[a]++
+  return mergeCentres(centers, pop, target)
+}
+
+// centres closer than this in Lab (~ΔE 3) are the same colour for
+// tufting purposes — always fused, even above the target count, so the
+// legend never shows near-duplicate swatches.
+const DUP_DIST2 = 9
+
+/** repeatedly fuse the two nearest centres (population-weighted mean)
+ *  until `target` remain AND no pair is a near-duplicate.
+ *  Deterministic; O(KFIT^3). */
+function mergeCentres(centres: Lab[], pop: number[], target: number): Lab[] {
+  const cs = centres.map((c) => [c[0], c[1], c[2]] as Lab)
+  const ps = pop.slice()
+  for (;;) {
+    let bi = 0
+    let bj = 1
+    let best = Infinity
+    for (let i = 0; i < cs.length; i++) {
+      for (let j = i + 1; j < cs.length; j++) {
+        const d = labDist2(cs[i], cs[j])
+        if (d < best) {
+          best = d
+          bi = i
+          bj = j
+        }
+      }
+    }
+    if (cs.length <= target && best > DUP_DIST2) break
+    if (cs.length <= 1) break
+    const wi = ps[bi] || 1
+    const wj = ps[bj] || 1
+    const w = wi + wj
+    cs[bi] = [
+      (cs[bi][0] * wi + cs[bj][0] * wj) / w,
+      (cs[bi][1] * wi + cs[bj][1] * wj) / w,
+      (cs[bi][2] * wi + cs[bj][2] * wj) / w,
+    ]
+    ps[bi] = ps[bi] + ps[bj]
+    cs.splice(bj, 1)
+    ps.splice(bj, 1)
+  }
+  return cs
 }
 
 function assignCells(

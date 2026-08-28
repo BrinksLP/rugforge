@@ -91,6 +91,40 @@ describe('buildPattern edge quality', () => {
     expect([...transitions]).toEqual([16])
   })
 
+  it('colour count moves monotonically with the slider', () => {
+    const COLS: [number, number, number][] = [
+      [230, 225, 210], // beige
+      [200, 60, 40], // red
+      [230, 160, 50], // orange
+      [55, 110, 90], // green
+      [50, 80, 140], // blue
+    ]
+    const src = img(100, 40, (x) => COLS[Math.min(4, Math.floor(x / 20))])
+    const count = (cc: number) =>
+      buildPattern({
+        source: src,
+        cols: 50,
+        rows: 20,
+        cellSizeMm: 5,
+        settings: settings({ colorCount: cc }),
+      }).palette.length
+
+    // a 5-colour image never shows more than 5, at any slider position >= 5
+    expect(count(10)).toBe(5)
+    expect(count(7)).toBe(5)
+    expect(count(6)).toBe(5)
+    expect(count(5)).toBe(5)
+    // below the real count it follows the slider
+    expect(count(4)).toBe(4)
+    expect(count(3)).toBe(3)
+
+    // and it is monotonic non-decreasing
+    const seq = [3, 4, 5, 6, 7, 8, 9, 10].map(count)
+    for (let i = 1; i < seq.length; i++) {
+      expect(seq[i]).toBeGreaterThanOrEqual(seq[i - 1])
+    }
+  })
+
   it('does not erode a frame that is several cells thick', () => {
     // 8px (4-cell) dark border around a light middle
     const src = img(80, 80, (x, y) => {
