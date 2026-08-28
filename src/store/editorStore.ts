@@ -138,6 +138,10 @@ export const useEditor = create<EditorState>((set, get) => ({
         colorMerges: p.colorMerges ?? {},
         bgColors: p.bgColors ?? [],
         pathSmoothing: p.pathSmoothing ?? 1.2,
+        businessProfile: {
+          ...p.businessProfile,
+          hoursPerM2: p.businessProfile?.hoursPerM2 ?? 4,
+        },
       },
       step: 0,
       maxStepReached: p.imageDataUrl ? 4 : 0,

@@ -107,6 +107,8 @@ export interface BusinessProfile {
   gluePricePerKg: number
   rollWidthCm: number
   hourlyRate: number
+  /** working hours per m² of finished rug (tuft + carve + glue + back + bind + trim) */
+  hoursPerM2: number
   electricityFlat: number
   /** Etsy / EU fee defaults */
   feeTransactionPct: number

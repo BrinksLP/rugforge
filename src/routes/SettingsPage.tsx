@@ -155,7 +155,7 @@ export function SettingsPage() {
           Business-Profil <span className="text-ink-soft">· {biz.name}</span>
         </h2>
         <p className="mt-1 text-xs text-ink-soft">
-          Wird ab Iteration 4 für Material-, Kosten- und Preisrechner benutzt.
+          Grundlage für die Kalkulation im Export-Schritt.
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Field label="Garnpreis">
@@ -200,7 +200,89 @@ export function SettingsPage() {
               suffix="€/h"
             />
           </Field>
+          <Field
+            label="Arbeitszeit"
+            hint="Stunden pro m² fertiger Teppich (Tuften + Schnitzen + Kleben + Rückseite + Kanten + Trimmen)."
+          >
+            <NumberInput
+              value={biz.hoursPerM2}
+              onChange={(v) => setBiz({ hoursPerM2: v })}
+              min={0}
+              step={0.5}
+              suffix="h/m²"
+            />
+          </Field>
+          <Field label="Strom (pauschal)">
+            <NumberInput
+              value={biz.electricityFlat}
+              onChange={(v) => setBiz({ electricityFlat: v })}
+              min={0}
+              step={0.1}
+              suffix="€"
+            />
+          </Field>
         </div>
+
+        <hr className="my-5 border-line" />
+        <h3 className="text-sm font-bold">Marktplatz-Gebühren & Ziel</h3>
+        <div className="mt-3 grid gap-4 sm:grid-cols-3">
+          <Field label="Transaktion" hint="% vom Verkaufspreis">
+            <NumberInput
+              value={biz.feeTransactionPct}
+              onChange={(v) => setBiz({ feeTransactionPct: v })}
+              min={0}
+              step={0.1}
+              suffix="%"
+            />
+          </Field>
+          <Field label="Zahlung" hint="% vom Verkaufspreis">
+            <NumberInput
+              value={biz.feePaymentPct}
+              onChange={(v) => setBiz({ feePaymentPct: v })}
+              min={0}
+              step={0.1}
+              suffix="%"
+            />
+          </Field>
+          <Field label="Zahlung fix">
+            <NumberInput
+              value={biz.feePaymentFixed}
+              onChange={(v) => setBiz({ feePaymentFixed: v })}
+              min={0}
+              step={0.05}
+              suffix="€"
+            />
+          </Field>
+          <Field label="Einstellgebühr">
+            <NumberInput
+              value={biz.feeListing}
+              onChange={(v) => setBiz({ feeListing: v })}
+              min={0}
+              step={0.05}
+              suffix="€"
+            />
+          </Field>
+          <Field label="Zielmarge">
+            <NumberInput
+              value={biz.targetMarginPct}
+              onChange={(v) => setBiz({ targetMarginPct: v })}
+              min={0}
+              max={90}
+              suffix="%"
+            />
+          </Field>
+          <Field label="Zielgewinn">
+            <NumberInput
+              value={biz.targetProfit}
+              onChange={(v) => setBiz({ targetProfit: v })}
+              min={0}
+              suffix="€"
+            />
+          </Field>
+        </div>
+        <p className="mt-3 text-xs text-ink-soft">
+          Ob Marge oder Gewinn als Ziel gilt, stellst du im Export-Schritt um.
+        </p>
       </Card>
     </div>
   )

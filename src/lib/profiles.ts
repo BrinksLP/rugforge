@@ -31,6 +31,7 @@ export const STANDARD_BUSINESS: BusinessProfile = {
   gluePricePerKg: 9,
   rollWidthCm: 200,
   hourlyRate: 15,
+  hoursPerM2: 4,
   electricityFlat: 0.5,
   feeTransactionPct: 6.5,
   feePaymentPct: 4,

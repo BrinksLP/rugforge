@@ -16,6 +16,7 @@ import {
 } from './pattern'
 import { yarnEstimate, yarnFromTravel } from './calc'
 import { buildTuftPath } from './tuftpath'
+import { projectCost } from './projectCost'
 import type { Pattern, Project } from '../types'
 
 /** predicate + set for "colours not being tufted" (background) */
@@ -201,7 +202,7 @@ function drawOverview(
     highlight: null,
   })
   const maxW = W - 120
-  const maxH = 760
+  const maxH = 600
   const s = Math.min(maxW / thumb.width, maxH / thumb.height)
   const tw = thumb.width * s
   const th = thumb.height * s
@@ -304,11 +305,39 @@ function drawOverview(
   )
   y += 96
 
+  // calculation
+  const pc = projectCost(pattern, project, sourceRaster)
+  const eur = (n: number) =>
+    Number.isFinite(n) ? `${n.toFixed(2)} €`.replace('.', ',') : '–'
+  y += 6
+  ctx.fillStyle = '#1f2328'
+  ctx.font = "bold 20px 'Inter', sans-serif"
+  ctx.fillText('Kalkulation', 112, y + 22)
+  ctx.font = "18px 'Inter', sans-serif"
+  ctx.fillStyle = '#5b6470'
+  ctx.fillText(
+    `Material ${eur(pc.cost.materialTotal)}  ·  Arbeit ${pc.cost.labourHours.toFixed(1)} h ` +
+      `${eur(pc.cost.labourCost)}  ·  Herstellkosten ${eur(pc.cost.total)}`,
+    112,
+    y + 48,
+  )
+  ctx.fillStyle = '#1f2328'
+  ctx.font = "bold 18px 'Inter', sans-serif"
+  ctx.fillText(
+    `Preisvorschlag ${eur(pc.price.price)}  ` +
+      (Number.isFinite(pc.price.marginPct)
+        ? `(${pc.price.marginPct.toFixed(0)} % Marge, Gewinn ${eur(pc.price.profit)})`
+        : '(Ziel nicht erreichbar)'),
+    112,
+    y + 74,
+  )
+  y += 96
+
   y += 10
   ctx.fillStyle = '#5b6470'
   ctx.font = "italic 16px 'Inter', sans-serif"
   ctx.fillText(
-    'Garnmengen sind grobe Schätzungen (±30–50 % ohne Kalibrierung).',
+    'Garn-/Kostenschätzung ±30–50 % ohne Kalibriertest. Preise & Ziel im Profil.',
     60,
     y,
   )

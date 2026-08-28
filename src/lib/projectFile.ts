@@ -34,5 +34,8 @@ export async function importProjectFile(file: File): Promise<Project> {
   if (!data.colorMerges) data.colorMerges = {}
   if (!data.bgColors) data.bgColors = []
   if (typeof data.pathSmoothing !== 'number') data.pathSmoothing = 1.2
+  if (data.businessProfile && data.businessProfile.hoursPerM2 == null) {
+    data.businessProfile.hoursPerM2 = 4
+  }
   return data as Project
 }
