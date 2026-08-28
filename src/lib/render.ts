@@ -193,40 +193,24 @@ export function drawTuftPath(
   const colorOf = new Int32Array(p.regions.length)
   for (const r of p.regions) colorOf[r.id] = effectiveColorIndex(r, recolors, merges)
 
+  // faint colour zones so you can still read the design
+  for (let y = 0; y < p.rows; y++) {
+    for (let x = 0; x < p.cols; x++) {
+      const rid = p.cells[y * p.cols + x]
+      if (rid < 0) continue
+      const ci = colorOf[rid]
+      const col = p.palette[ci]
+      if (!col || bgColors?.has(ci)) continue
+      ctx.globalAlpha = 0.16
+      ctx.fillStyle = col.hex
+      ctx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx)
+    }
+  }
+  ctx.globalAlpha = 1
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
 
   const pathById = new Map(plan.paths.map((pp) => [pp.regionId, pp]))
-
-  const traceLoops = (loops: [number, number][][]) => {
-    ctx.beginPath()
-    for (const loop of loops) {
-      if (loop.length < 2) continue
-      loop.forEach(([cx, cy], i) => {
-        const X = cx * pxPerCm
-        const Y = cy * pxPerCm
-        if (i === 0) ctx.moveTo(X, Y)
-        else ctx.lineTo(X, Y)
-      })
-      ctx.closePath()
-    }
-  }
-
-  // solid colour fill from the smoothed outline polygons (holes via evenodd)
-  for (const rid of plan.order) {
-    const pp = pathById.get(rid)
-    if (!pp || !pp.outline.length) continue
-    const ci = colorOf[rid]
-    const col = p.palette[ci]
-    if (!col || bgColors?.has(ci)) continue
-    const dim = highlight != null && highlight >= 0 && ci !== highlight
-    ctx.globalAlpha = dim ? 0.12 : 1
-    ctx.fillStyle = col.hex
-    traceLoops(pp.outline)
-    ctx.fill('evenodd')
-  }
-  ctx.globalAlpha = 1
-
   const labels: { x: number; y: number; n: number }[] = []
   let seq = 0
   for (const rid of plan.order) {
