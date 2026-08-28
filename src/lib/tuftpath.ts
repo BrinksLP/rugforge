@@ -90,9 +90,30 @@ function loopLen(loop: Pt[]): number {
   return polylineLen([...loop, loop[0]])
 }
 
-/** how far (in cells) the simplified outline may stray from the staircase */
-const OUTLINE_EPS = 0.9
-const OUTLINE_SMOOTH = 3
+/** how far (in stitches) the simplified outline may stray from the trace */
+const OUTLINE_EPS = 0.7
+/** Chaikin passes (subdivide corners) then binomial low-pass passes */
+const OUTLINE_CHAIKIN = 2
+const OUTLINE_LOWPASS = 3
+
+/** [1,2,1]/4 low-pass on a closed loop — flattens sub-stitch wobble
+ *  without rounding real corners as hard as more Chaikin would */
+function smoothLoop(loop: Pt[], passes: number): Pt[] {
+  if (loop.length < 5) return loop
+  let pts = loop
+  for (let p = 0; p < passes; p++) {
+    const n = pts.length
+    const out: Pt[] = new Array(n)
+    for (let i = 0; i < n; i++) {
+      const a = pts[(i - 1 + n) % n]
+      const b = pts[i]
+      const c = pts[(i + 1) % n]
+      out[i] = [(a[0] + 2 * b[0] + c[0]) / 4, (a[1] + 2 * b[1] + c[1]) / 4]
+    }
+    pts = out
+  }
+  return pts
+}
 
 function perpDist(p: Pt, a: Pt, b: Pt): number {
   const dx = b[0] - a[0]
@@ -356,12 +377,49 @@ function serpentineFill(
   return strokes
 }
 
+/** EMPTY-aware 3x3 majority filter on a label grid — smooths the fine
+ *  boundary and removes single-cell teeth before tracing */
+function majoritySmooth(g: Int32Array, w: number, h: number, passes: number) {
+  const cnt = new Map<number, number>()
+  for (let p = 0; p < passes; p++) {
+    const next = g.slice()
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x
+        if (g[i] === EMPTY) continue
+        cnt.clear()
+        let best = g[i]
+        let bn = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            const ny = y + dy
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+            const v = g[ny * w + nx]
+            if (v === EMPTY) continue
+            const c = (cnt.get(v) ?? 0) + 1
+            cnt.set(v, c)
+            if (c > bn) {
+              bn = c
+              best = v
+            }
+          }
+        }
+        next[i] = best
+      }
+    }
+    g.set(next)
+  }
+}
+
 /* ---- image-refined boundary grid ----------------------------- *
- * Upsample the stitch grid by `factor` and, for every fine cell that
- * sits in a 1-stitch band along a colour edge, re-assign it to whichever
- * neighbouring region's colour the ORIGINAL image pixel there is closest
- * to. Interior cells keep their parent. Result: the traced outline
- * follows the photo edge, clamped to ±1 stitch of the committed grid.
+ * Upsample the stitch grid by `factor` and, for every fine cell in the
+ * 1-stitch band along a colour edge, re-assign it to whichever
+ * neighbouring region's colour the ORIGINAL image matches there — using
+ * an AREA AVERAGE of the source under the fine cell, not one pixel, so
+ * photo texture / anti-aliasing doesn't add jitter. Then a majority
+ * filter cleans the fine boundary. Interior cells keep their parent.
+ * Outline stays clamped to ±1 stitch of the committed grid.
  * ------------------------------------------------------------------ */
 
 function refineGrid(
@@ -380,10 +438,11 @@ function refineGrid(
     cx >= 0 && cy >= 0 && cx < cols && cy < rows ? cells[cy * cols + cx] : EMPTY
 
   for (let fy = 0; fy < frows; fy++) {
-    const py = (fy / factor) | 0
-    const sy = Math.min(sh - 1, (((fy + 0.5) / frows) * sh) | 0)
+    const sy0 = ((fy * sh) / frows) | 0
+    const sy1 = Math.max(sy0 + 1, (((fy + 1) * sh) / frows) | 0)
     for (let fx = 0; fx < fcols; fx++) {
       const px = (fx / factor) | 0
+      const py = (fy / factor) | 0
       const parent = cells[py * cols + px]
       const fi = fy * fcols + fx
       if (parent === EMPTY) {
@@ -406,25 +465,41 @@ function refineGrid(
         continue
       }
 
-      const sx = Math.min(sw - 1, (((fx + 0.5) / fcols) * sw) | 0)
-      const p = (sy * sw + sx) * 4
-      if (data[p + 3] < 128) {
+      const sx0 = ((fx * sw) / fcols) | 0
+      const sx1 = Math.max(sx0 + 1, (((fx + 1) * sw) / fcols) | 0)
+      let r = 0
+      let g = 0
+      let b = 0
+      let n = 0
+      for (let y = sy0; y < sy1; y++) {
+        for (let x = sx0; x < sx1; x++) {
+          const p = (y * sw + x) * 4
+          if (data[p + 3] < 128) continue
+          r += data[p]
+          g += data[p + 1]
+          b += data[p + 2]
+          n++
+        }
+      }
+      if (n === 0) {
         fine[fi] = EMPTY
         continue
       }
-      const lab = rgbToLab(data[p], data[p + 1], data[p + 2])
+      const lab = rgbToLab(r / n, g / n, b / n)
       let best = parent
       let bd = Infinity
-      for (const r of candidates) {
-        const d = labDist2(lab, refine.colorLabOf(r))
+      for (const cand of candidates) {
+        const d = labDist2(lab, refine.colorLabOf(cand))
         if (d < bd) {
           bd = d
-          best = r
+          best = cand
         }
       }
       fine[fi] = best
     }
   }
+
+  majoritySmooth(fine, fcols, frows, 2)
   return { fine, fcols, frows, factor }
 }
 
@@ -461,15 +536,13 @@ export function buildTuftPath(
       rawOutline = traceOutline(cells, cols, rows, region.id)
       div = 1
     }
-    const outline = rawOutline.map((loop) =>
-      chaikin(
-        simplifyLoop(
-          loop.map(([x, y]): Pt => [x / div, y / div]),
-          OUTLINE_EPS,
-        ),
-        OUTLINE_SMOOTH,
-      ).map(([x, y]): Pt => [x * cellCm, y * cellCm]),
-    )
+    const outline = rawOutline.map((loop) => {
+      const stitchPts = loop.map(([x, y]): Pt => [x / div, y / div])
+      const simplified = simplifyLoop(stitchPts, OUTLINE_EPS)
+      const rounded = chaikin(simplified, OUTLINE_CHAIKIN)
+      const smooth = smoothLoop(rounded, OUTLINE_LOWPASS)
+      return smooth.map(([x, y]): Pt => [x * cellCm, y * cellCm])
+    })
     const outlineLenCm = outline.reduce((s, l) => s + loopLen(l), 0)
 
     const rawFill = serpentineFill(cells, cols, rows, region.id, spacingCells)
