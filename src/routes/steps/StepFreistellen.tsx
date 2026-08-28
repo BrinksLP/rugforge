@@ -28,7 +28,7 @@ export function StepFreistellen() {
 
   const [segBusy, setSegBusy] = useState<null | 'loading' | 'running'>(null)
   const [segError, setSegError] = useState<string | null>(null)
-  const [threshold, setThreshold] = useState(0.5)
+  const [threshold, setThreshold] = useState(0.4)
 
   const natural = img
     ? { w: img.naturalWidth, h: img.naturalHeight }
@@ -140,16 +140,28 @@ export function StepFreistellen() {
     force((n) => n + 1)
   }
 
-  /** keep only the large connected blobs of the mask, drop specks
-   *  (leftover watermark bits, stray auto-mask fragments) */
+  /** clean up the mask: intersect with the image's own opaque area
+   *  (drops semi-transparent watermark residue), then keep only the
+   *  large connected blobs (drops specks / stray fragments) */
   function keepLargestBlobs() {
     const c = maskRef.current
-    if (!c) return
+    if (!c || !img) return
     const ctx = c.getContext('2d')!
     const { width, height } = c
     const d = ctx.getImageData(0, 0, width, height)
     const a = d.data
     const n = width * height
+
+    // 1. drop anything that isn't (mostly) opaque in the source image
+    const tmp = document.createElement('canvas')
+    tmp.width = width
+    tmp.height = height
+    const tctx = tmp.getContext('2d')!
+    tctx.drawImage(img, 0, 0, width, height)
+    const src = tctx.getImageData(0, 0, width, height).data
+    for (let i = 3; i < a.length; i += 4) {
+      if (src[i] < 128) a[i] = 0
+    }
     const label = new Int32Array(n).fill(-1)
     const sizes: number[] = []
     const stack: number[] = []
@@ -211,7 +223,6 @@ export function StepFreistellen() {
       ctx.globalCompositeOperation = 'source-over'
       ctx.clearRect(0, 0, c.width, c.height)
       ctx.drawImage(result, 0, 0)
-      keepLargestBlobs()
       setMask(c)
       setBrush(true)
       force((n) => n + 1)
@@ -367,7 +378,7 @@ export function StepFreistellen() {
           <Field label={`Feinheit des Schnitts: ${threshold.toFixed(2)}`}>
             <input
               type="range"
-              min={0.3}
+              min={0.2}
               max={0.7}
               step={0.05}
               value={threshold}
@@ -383,8 +394,8 @@ export function StepFreistellen() {
             Kleine Reste entfernen
           </Button>
           <p className="text-xs text-ink-soft">
-            Behält nur die großen zusammenhängenden Flächen — löscht
-            Wasserzeichen-Punkte und Sprenkel.
+            Verwirft halbtransparente Bereiche (Wasserzeichen) und behält nur
+            die großen zusammenhängenden Flächen.
           </p>
           {segError ? (
             <p className="rounded-[8px] bg-warn/15 px-3 py-2 text-xs text-warn">

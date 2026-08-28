@@ -112,6 +112,7 @@ export async function segmentForeground(
   // --- normalise + threshold into a small alpha canvas ---
   const norm = minMaxNormalise(scores)
   const alpha = thresholdToAlpha(norm, threshold)
+  fillHoles(alpha, MODEL_SIZE, MODEL_SIZE)
 
   const smallCv = document.createElement('canvas')
   smallCv.width = MODEL_SIZE
@@ -138,6 +139,42 @@ export async function segmentForeground(
   mctx.drawImage(smallCv, 0, 0, MODEL_SIZE, MODEL_SIZE, sx, sy, sw, sh)
 
   return mask
+}
+
+/**
+ * Fill enclosed background holes: flood "outside" from the borders over
+ * transparent cells; any transparent cell not reached sits inside the
+ * subject, so make it opaque. Fixes u2netp leaving gaps in a flat/light
+ * region of the motif.
+ */
+export function fillHoles(alpha: Uint8ClampedArray, w: number, h: number) {
+  const outside = new Uint8Array(w * h)
+  const stack: number[] = []
+  const push = (i: number) => {
+    if (i >= 0 && i < w * h && !outside[i] && alpha[i] < 128) {
+      outside[i] = 1
+      stack.push(i)
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    push(x)
+    push((h - 1) * w + x)
+  }
+  for (let y = 0; y < h; y++) {
+    push(y * w)
+    push(y * w + w - 1)
+  }
+  while (stack.length) {
+    const i = stack.pop()!
+    const x = i % w
+    if (x > 0) push(i - 1)
+    if (x < w - 1) push(i + 1)
+    if (i >= w) push(i - w)
+    if (i < w * (h - 1)) push(i + w)
+  }
+  for (let i = 0; i < w * h; i++) {
+    if (alpha[i] < 128 && !outside[i]) alpha[i] = 255
+  }
 }
 
 /* ---- pure helpers (unit-tested) --------------------------------- */
