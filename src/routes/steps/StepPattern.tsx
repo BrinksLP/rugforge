@@ -143,7 +143,7 @@ export function StepPattern() {
             skipRegion,
             outlineEps: project.pathSmoothing,
             refine: sourceRaster
-              ? { source: sourceRaster, colorLabOf, factor: 3 }
+              ? { source: sourceRaster, colorLabOf }
               : undefined,
           })
         : null,

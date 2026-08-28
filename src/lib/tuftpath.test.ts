@@ -186,11 +186,13 @@ describe('image-refined outline', () => {
   it('pulls the region edge toward the photo edge', () => {
     const plain = buildTuftPath(pattern).paths.find((p) => p.regionId === 1)!
     const refined = buildTuftPath(pattern, {
-      refine: { source, colorLabOf, factor: 3 },
+      refine: { source, colorLabOf },
     }).paths.find((p) => p.regionId === 1)!
 
-    expect(minX(plain)).toBeGreaterThan(4.7) // ~5 cm, the grid split
-    expect(minX(refined)).toBeLessThan(4.7) // moved left toward x=4
+    // plain outline sits at the grid split (~5); refined is pulled left
+    // toward the real colour edge at x=4
+    expect(minX(plain)).toBeGreaterThan(4.7)
+    expect(minX(refined)).toBeLessThan(minX(plain) - 0.15)
   })
 })
 

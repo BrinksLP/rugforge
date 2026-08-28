@@ -62,8 +62,6 @@ export interface RefineInput {
   source: ImageData
   /** effective Lab colour of a region id (honours recolours / merges) */
   colorLabOf: (regionId: number) => Lab
-  /** boundary-grid upsample factor (default 3, capped 1..6) */
-  factor?: number
 }
 
 export interface TuftOptions {
@@ -93,10 +91,11 @@ function loopLen(loop: Pt[]): number {
 }
 
 /** default RDP tolerance in stitches — how far the smoothed outline may
- *  leave the traced boundary. Higher = fewer bumps, looser fit. */
-const OUTLINE_EPS = 2
+ *  leave the traced boundary. With an image-resolution trace this only
+ *  needs to absorb pixel aliasing, not stitch-sized bumps. */
+const OUTLINE_EPS = 1.2
 /** Chaikin passes (subdivide corners) then binomial low-pass passes */
-const OUTLINE_CHAIKIN = 4
+const OUTLINE_CHAIKIN = 3
 const OUTLINE_LOWPASS = 2
 
 /** [1,2,1]/4 low-pass on a closed loop — flattens sub-stitch wobble
@@ -223,12 +222,24 @@ function traceOutline(
   cols: number,
   rows: number,
   regionId: number,
+  /** optional scan window [x0,y0,x1,y1] inclusive, to avoid scanning the
+   *  whole (possibly huge) grid for one region */
+  win?: [number, number, number, number],
 ): Pt[][] {
   const inside = (x: number, y: number) =>
     x >= 0 && y >= 0 && x < cols && y < rows && cells[y * cols + x] === regionId
 
-  // undirected unit edges on the corner lattice, keyed so duplicates merge
+  const x0 = win ? Math.max(0, win[0]) : 0
+  const y0 = win ? Math.max(0, win[1]) : 0
+  const x1 = win ? Math.min(cols - 1, win[2]) : cols - 1
+  const y1 = win ? Math.min(rows - 1, win[3]) : rows - 1
+
+  // undirected unit edges on the corner lattice, keyed with plain numbers
+  // (string keys are far too slow at image resolution)
+  const stride = (cols + 1) * (rows + 1) + 1
   const key = (x: number, y: number) => y * (cols + 1) + x
+  const edgeKey = (a: number, b: number) =>
+    a < b ? a * stride + b : b * stride + a
   const adj = new Map<number, number[]>()
   const link = (a: number, b: number) => {
     let list = adj.get(a)
@@ -238,19 +249,19 @@ function traceOutline(
     }
     list.push(b)
   }
-  const seen = new Set<string>()
+  const seen = new Set<number>()
   const addEdge = (ax: number, ay: number, bx: number, by: number) => {
     const ka = key(ax, ay)
     const kb = key(bx, by)
-    const ek = ka < kb ? `${ka}_${kb}` : `${kb}_${ka}`
+    const ek = edgeKey(ka, kb)
     if (seen.has(ek)) return
     seen.add(ek)
     link(ka, kb)
     link(kb, ka)
   }
 
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
       if (!inside(x, y)) continue
       if (!inside(x - 1, y)) addEdge(x, y, x, y + 1)
       if (!inside(x + 1, y)) addEdge(x + 1, y, x + 1, y + 1)
@@ -259,32 +270,31 @@ function traceOutline(
     }
   }
 
-  const usedEdge = new Set<string>()
-  const ekey = (a: number, b: number) => (a < b ? `${a}_${b}` : `${b}_${a}`)
+  const usedEdge = new Set<number>()
   const px = (k: number) => k % (cols + 1)
   const py = (k: number) => Math.floor(k / (cols + 1))
 
   const loops: Pt[][] = []
   for (const start of adj.keys()) {
     for (const first of adj.get(start)!) {
-      if (usedEdge.has(ekey(start, first))) continue
+      if (usedEdge.has(edgeKey(start, first))) continue
       const loop: Pt[] = [[px(start), py(start)]]
       let prev = start
       let cur = first
-      usedEdge.add(ekey(start, first))
+      usedEdge.add(edgeKey(start, first))
       let guard = 0
-      while (cur !== start && guard++ < 200000) {
+      while (cur !== start && guard++ < 2_000_000) {
         loop.push([px(cur), py(cur)])
         const nexts = adj.get(cur) ?? []
         let step = -1
         for (const n of nexts) {
           if (n === prev) continue
-          if (usedEdge.has(ekey(cur, n))) continue
+          if (usedEdge.has(edgeKey(cur, n))) continue
           step = n
           break
         }
         if (step < 0) break
-        usedEdge.add(ekey(cur, step))
+        usedEdge.add(edgeKey(cur, step))
         prev = cur
         cur = step
       }
@@ -380,130 +390,96 @@ function serpentineFill(
   return strokes
 }
 
-/** EMPTY-aware 3x3 majority filter on a label grid — smooths the fine
- *  boundary and removes single-cell teeth before tracing */
-function majoritySmooth(g: Int32Array, w: number, h: number, passes: number) {
-  const cnt = new Map<number, number>()
-  for (let p = 0; p < passes; p++) {
-    const next = g.slice()
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x
-        if (g[i] === EMPTY) continue
-        cnt.clear()
-        let best = g[i]
-        let bn = 0
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nx = x + dx
-            const ny = y + dy
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
-            const v = g[ny * w + nx]
-            if (v === EMPTY) continue
-            const c = (cnt.get(v) ?? 0) + 1
-            cnt.set(v, c)
-            if (c > bn) {
-              bn = c
-              best = v
-            }
-          }
-        }
-        next[i] = best
-      }
-    }
-    g.set(next)
-  }
-}
-
-/* ---- image-refined boundary grid ----------------------------- *
- * Upsample the stitch grid by `factor` and, for every fine cell in the
- * 1-stitch band along a colour edge, re-assign it to whichever
- * neighbouring region's colour the ORIGINAL image matches there — using
- * an AREA AVERAGE of the source under the fine cell, not one pixel, so
- * photo texture / anti-aliasing doesn't add jitter. Then a majority
- * filter cleans the fine boundary. Interior cells keep their parent.
- * Outline stays clamped to ±1 stitch of the committed grid.
+/* ---- snap the coarse outline to the image edge --------------- *
+ * Trace once on the stitch grid (cheap), then move every outline
+ * vertex along its local normal to where the ORIGINAL image actually
+ * changes colour — search ±SNAP_REACH stitches, ~0.2-stitch steps. No
+ * fine grid: cost is ~(perimeter) samples, not (area · factor²).
+ * The vertex can't move more than SNAP_REACH, so the outline still
+ * matches the committed template to within ~1 stitch.
  * ------------------------------------------------------------------ */
 
-function refineGrid(
+const SNAP_REACH = 1.5
+
+function snapLoopToImage(
+  loop: Pt[], // stitch-corner coords
+  regionId: number,
   cells: Int32Array,
   cols: number,
   rows: number,
   refine: RefineInput,
-): { fine: Int32Array; fcols: number; frows: number; factor: number } {
-  const factor = Math.max(1, Math.min(6, Math.round(refine.factor ?? 3)))
-  const fcols = cols * factor
-  const frows = rows * factor
-  const fine = new Int32Array(fcols * frows)
+): Pt[] {
   const { data, width: sw, height: sh } = refine.source
+  const spX = sw / cols
+  const spY = sh / rows
+  const ownLab = refine.colorLabOf(regionId)
 
   const regionAt = (cx: number, cy: number) =>
     cx >= 0 && cy >= 0 && cx < cols && cy < rows ? cells[cy * cols + cx] : EMPTY
 
-  for (let fy = 0; fy < frows; fy++) {
-    const sy0 = ((fy * sh) / frows) | 0
-    const sy1 = Math.max(sy0 + 1, (((fy + 1) * sh) / frows) | 0)
-    for (let fx = 0; fx < fcols; fx++) {
-      const px = (fx / factor) | 0
-      const py = (fy / factor) | 0
-      const parent = cells[py * cols + px]
-      const fi = fy * fcols + fx
-      if (parent === EMPTY) {
-        fine[fi] = EMPTY
-        continue
-      }
-
-      let candidates: number[] | null = null
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue
-          const r = regionAt(px + dx, py + dy)
-          if (r === EMPTY || r === parent) continue
-          if (!candidates) candidates = [parent]
-          if (!candidates.includes(r)) candidates.push(r)
-        }
-      }
-      if (!candidates) {
-        fine[fi] = parent // interior — nothing to refine
-        continue
-      }
-
-      const sx0 = ((fx * sw) / fcols) | 0
-      const sx1 = Math.max(sx0 + 1, (((fx + 1) * sw) / fcols) | 0)
-      let r = 0
-      let g = 0
-      let b = 0
-      let n = 0
-      for (let y = sy0; y < sy1; y++) {
-        for (let x = sx0; x < sx1; x++) {
-          const p = (y * sw + x) * 4
-          if (data[p + 3] < 128) continue
-          r += data[p]
-          g += data[p + 1]
-          b += data[p + 2]
-          n++
-        }
-      }
-      if (n === 0) {
-        fine[fi] = EMPTY
-        continue
-      }
-      const lab = rgbToLab(r / n, g / n, b / n)
-      let best = parent
-      let bd = Infinity
-      for (const cand of candidates) {
-        const d = labDist2(lab, refine.colorLabOf(cand))
-        if (d < bd) {
-          bd = d
-          best = cand
-        }
-      }
-      fine[fi] = best
+  const labMemo = new Map<number, Lab>()
+  const labOf = (rid: number) => {
+    let v = labMemo.get(rid)
+    if (v === undefined) {
+      v = refine.colorLabOf(rid)
+      labMemo.set(rid, v)
     }
+    return v
   }
 
-  majoritySmooth(fine, fcols, frows, 2)
-  return { fine, fcols, frows, factor }
+  const sampleLab = (stx: number, sty: number): Lab | null => {
+    let ix = (stx * spX) | 0
+    let iy = (sty * spY) | 0
+    if (ix < 0) ix = 0
+    else if (ix >= sw) ix = sw - 1
+    if (iy < 0) iy = 0
+    else if (iy >= sh) iy = sh - 1
+    const p = (iy * sw + ix) * 4
+    if (data[p + 3] < 128) return null
+    return rgbToLab(data[p], data[p + 1], data[p + 2])
+  }
+
+  const n = loop.length
+  const out: Pt[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const a = loop[(i - 1 + n) % n]
+    const b = loop[i]
+    const c = loop[(i + 1) % n]
+    let tx = c[0] - a[0]
+    let ty = c[1] - a[1]
+    const tl = Math.hypot(tx, ty) || 1
+    tx /= tl
+    ty /= tl
+    // normal, flipped so +m points OUT of the region
+    let mx = ty
+    let my = -tx
+    if (regionAt((b[0] + mx * 0.7) | 0, (b[1] + my * 0.7) | 0) === regionId) {
+      mx = -mx
+      my = -my
+    }
+    const outRid = regionAt(
+      Math.min(cols - 1, Math.max(0, (b[0] + mx * 0.9) | 0)),
+      Math.min(rows - 1, Math.max(0, (b[1] + my * 0.9) | 0)),
+    )
+    const outLab = outRid >= 0 ? labOf(outRid) : null
+
+    // walk the normal from inside to outside; the last still-inside
+    // sample is the colour edge
+    let edgeT = 0
+    let found = false
+    for (let k = -SNAP_REACH; k <= SNAP_REACH + 1e-6; k += 0.2) {
+      const lab = sampleLab(b[0] + mx * k, b[1] + my * k)
+      if (!lab) continue
+      const dOwn = labDist2(lab, ownLab)
+      const dOut = outLab ? labDist2(lab, outLab) : dOwn + 1
+      if (dOwn <= dOut) {
+        edgeT = k
+        found = true
+      }
+    }
+    out[i] = found ? [b[0] + mx * edgeT, b[1] + my * edgeT] : [b[0], b[1]]
+  }
+  return out
 }
 
 /* ---- assemble ---------------------------------------------- */
@@ -522,27 +498,24 @@ export function buildTuftPath(
   const skip = opts.skipRegion ?? (() => false)
   const kept = regions.filter((r) => !skip(r.id))
   const eps = Math.max(0.1, opts.outlineEps ?? OUTLINE_EPS)
-
-  const refined = opts.refine
-    ? refineGrid(cells, cols, rows, opts.refine)
-    : null
+  const refine = opts.refine
 
   const paths: RegionPath[] = []
   let totalTravelCm = 0
 
   for (const region of kept) {
-    let rawOutline = refined
-      ? traceOutline(refined.fine, refined.fcols, refined.frows, region.id)
-      : traceOutline(cells, cols, rows, region.id)
-    let div = refined ? refined.factor : 1
-    if (refined && rawOutline.length === 0) {
-      // region vanished from the refined band (tiny) — fall back to grid
-      rawOutline = traceOutline(cells, cols, rows, region.id)
-      div = 1
-    }
+    const [bx0, by0, bx1, by1] = region.bbox
+    const rawOutline = traceOutline(cells, cols, rows, region.id, [
+      bx0 - 1,
+      by0 - 1,
+      bx1 + 1,
+      by1 + 1,
+    ])
     const outline = rawOutline.map((loop) => {
-      const stitchPts = loop.map(([x, y]): Pt => [x / div, y / div])
-      const simplified = simplifyLoop(stitchPts, eps)
+      const snapped = refine
+        ? snapLoopToImage(loop, region.id, cells, cols, rows, refine)
+        : loop
+      const simplified = simplifyLoop(snapped, eps)
       const rounded = chaikin(simplified, OUTLINE_CHAIKIN)
       const smooth = smoothLoop(rounded, OUTLINE_LOWPASS)
       return smooth.map(([x, y]): Pt => [x * cellCm, y * cellCm])

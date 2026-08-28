@@ -33,6 +33,6 @@ export async function importProjectFile(file: File): Promise<Project> {
   if (data.version !== 1) data.version = 1
   if (!data.colorMerges) data.colorMerges = {}
   if (!data.bgColors) data.bgColors = []
-  if (typeof data.pathSmoothing !== 'number') data.pathSmoothing = 2
+  if (typeof data.pathSmoothing !== 'number') data.pathSmoothing = 1.2
   return data as Project
 }

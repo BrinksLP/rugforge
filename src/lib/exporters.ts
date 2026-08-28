@@ -39,7 +39,6 @@ function refineFor(
   const merges = project.colorMerges ?? {}
   return {
     source: sourceRaster,
-    factor: 3,
     colorLabOf: (rid: number) => {
       const ci = effectiveColorIndex(
         pattern.regions[rid],
