@@ -24,7 +24,8 @@ export function StepExport() {
   const [grid, setGrid] = useState(true)
   const [numbers, setNumbers] = useState(true)
   const [mirror, setMirror] = useState(true) // tuft from the back → ON by default
-  const [pathMode, setPathMode] = useState(false)
+  const [view, setView] = useState<'path' | 'raster'>('path')
+  const pathMode = view === 'path'
 
   const calc = useMemo(
     () => (pattern && !stale ? projectCost(pattern, project, sourceRaster) : null),
@@ -49,23 +50,49 @@ export function StepExport() {
     <div className="grid gap-6 md:grid-cols-[300px_1fr]">
       <Card className="p-5">
         <h3 className="text-sm font-bold">Optionen</h3>
+
+        <div className="mt-3">
+          <div className="flex overflow-hidden rounded-[8px] border border-line text-sm">
+            <button
+              className={`flex-1 px-3 py-1.5 ${view === 'path' ? 'bg-accent text-white' : 'hover:bg-canvas'}`}
+              onClick={() => setView('path')}
+            >
+              Pfad
+            </button>
+            <button
+              className={`flex-1 px-3 py-1.5 ${view === 'raster' ? 'bg-accent text-white' : 'hover:bg-canvas'}`}
+              onClick={() => setView('raster')}
+            >
+              Raster
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-ink-soft">
+            Pfad = gefüllte Flächen + Kontur + Bahnen + Reihenfolge. Raster =
+            Stichkästchen zum Auszählen.
+          </p>
+        </div>
+
         <div className="mt-3 space-y-2 text-sm">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={grid}
-              onChange={(e) => setGrid(e.target.checked)}
-            />
-            Raster
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={numbers}
-              onChange={(e) => setNumbers(e.target.checked)}
-            />
-            Farbnummern
-          </label>
+          {view === 'raster' ? (
+            <>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={grid}
+                  onChange={(e) => setGrid(e.target.checked)}
+                />
+                Gitterlinien
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={numbers}
+                  onChange={(e) => setNumbers(e.target.checked)}
+                />
+                Farbnummern
+              </label>
+            </>
+          ) : null}
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -74,15 +101,6 @@ export function StepExport() {
             />
             Gespiegelt
             <Info text="Beim Tuften arbeitest du von der Rückseite — Standard ist gespiegelt." />
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={pathMode}
-              onChange={(e) => setPathMode(e.target.checked)}
-            />
-            Tufting-Pfad
-            <Info text="Zeigt Kontur + Füllbahnen mit Reihenfolge-Nummern statt des Rasters (nur im PNG)." />
           </label>
         </div>
         <p className="mt-4 text-xs text-ink-soft">
@@ -226,8 +244,8 @@ export function StepExport() {
         <Card className="p-5">
           <h3 className="text-sm font-bold">Vorlage als Bild</h3>
           <p className="mt-1 text-sm text-ink-soft">
-            PNG für Beamer oder Tablet — lange Seite ~2560 px. Farbnummern
-            erscheinen nur, wenn die Zellen groß genug werden.
+            {view === 'path' ? 'Pfad-Ansicht' : 'Raster-Ansicht'} als PNG für
+            Beamer oder Tablet — lange Seite ~2560 px.
           </p>
           <div className="mt-3">
             <Button onClick={() => exportPatternPng(pattern, project, pngOpts)}>
