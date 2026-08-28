@@ -229,7 +229,12 @@ export function StepFreistellen() {
             }}
           />
           {maskRef.current ? (
-            <MaskPreview canvas={maskRef.current} w={displayW} h={displayH} />
+            <MaskPreview
+              canvas={maskRef.current}
+              img={img}
+              w={displayW}
+              h={displayH}
+            />
           ) : null}
 
           {brush ? (
@@ -374,10 +379,12 @@ export function StepFreistellen() {
 
 function MaskPreview({
   canvas,
+  img,
   w,
   h,
 }: {
   canvas: HTMLCanvasElement
+  img: HTMLImageElement
   w: number
   h: number
 }) {
@@ -390,14 +397,25 @@ function MaskPreview({
     const ctx = dst.getContext('2d')!
     ctx.clearRect(0, 0, w, h)
 
-    // turquoise wash over the area that will be KEPT (mask = opaque)
+    // effective "keep" silhouette = mask ∩ the source image's own alpha,
+    // so a transparent background never gets tinted
+    const keep = document.createElement('canvas')
+    keep.width = w
+    keep.height = h
+    const kc = keep.getContext('2d')!
+    kc.drawImage(img, 0, 0, w, h)
+    kc.globalCompositeOperation = 'destination-in'
+    kc.drawImage(canvas, 0, 0, w, h)
+    kc.globalCompositeOperation = 'source-over'
+
+    // turquoise wash over that silhouette
     ctx.fillStyle = 'rgba(45, 212, 191, 0.22)'
     ctx.fillRect(0, 0, w, h)
     ctx.globalCompositeOperation = 'destination-in'
-    ctx.drawImage(canvas, 0, 0, w, h)
+    ctx.drawImage(keep, 0, 0)
     ctx.globalCompositeOperation = 'source-over'
 
-    // darker contour: dilate the mask silhouette, subtract the original
+    // darker contour: dilate the silhouette, subtract the original
     const ring = document.createElement('canvas')
     ring.width = w
     ring.height = h
@@ -405,15 +423,13 @@ function MaskPreview({
     const r = 2
     for (let a = 0; a < 8; a++) {
       rc.drawImage(
-        canvas,
+        keep,
         Math.round(r * Math.cos((a * Math.PI) / 4)),
         Math.round(r * Math.sin((a * Math.PI) / 4)),
-        w,
-        h,
       )
     }
     rc.globalCompositeOperation = 'destination-out'
-    rc.drawImage(canvas, 0, 0, w, h)
+    rc.drawImage(keep, 0, 0)
     rc.globalCompositeOperation = 'source-in'
     rc.fillStyle = 'rgba(13, 148, 136, 0.9)'
     rc.fillRect(0, 0, w, h)
