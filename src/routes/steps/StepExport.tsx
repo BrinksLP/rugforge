@@ -12,6 +12,7 @@ import { exportProjectFile } from '../../lib/projectFile'
 export function StepExport() {
   const project = useEditor((s) => s.project)
   const pattern = useEditor((s) => s.pattern)
+  const sourceRaster = useEditor((s) => s.sourceRaster)
   const stale = useEditor((s) => s.patternStale)
   const recompute = useEditor((s) => s.recompute)
 
@@ -32,7 +33,7 @@ export function StepExport() {
   }
 
   const opts = { showGrid: grid, showNumbers: numbers, mirror }
-  const pngOpts = { ...opts, pathMode }
+  const pngOpts = { ...opts, pathMode, sourceRaster }
 
   return (
     <div className="grid gap-6 md:grid-cols-[300px_1fr]">
@@ -100,13 +101,13 @@ export function StepExport() {
           <div className="mt-3 flex gap-2">
             <Button
               variant="ghost"
-              onClick={() => exportOverviewPng(pattern, project)}
+              onClick={() => exportOverviewPng(pattern, project, sourceRaster)}
             >
               PNG
             </Button>
             <Button
               variant="ghost"
-              onClick={() => exportOverviewPdf(pattern, project)}
+              onClick={() => exportOverviewPdf(pattern, project, sourceRaster)}
             >
               PDF
             </Button>

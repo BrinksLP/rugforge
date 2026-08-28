@@ -25,6 +25,7 @@ const PRESET_LABEL: Record<PatternPreset, string> = {
 export function StepPattern() {
   const project = useEditor((s) => s.project)
   const pattern = useEditor((s) => s.pattern)
+  const sourceRaster = useEditor((s) => s.sourceRaster)
   const stale = useEditor((s) => s.patternStale)
   const computing = useEditor((s) => s.computing)
   const recompute = useEditor((s) => s.recompute)
@@ -121,12 +122,30 @@ export function StepPattern() {
     [pattern, project.recolors, merges, bgSet],
   )
 
+  const colorLabOf = useMemo(() => {
+    const pal = pattern?.palette
+    return (rid: number): [number, number, number] => {
+      if (!pattern || !pal) return [0, 0, 0]
+      const ci = effectiveColorIndex(
+        pattern.regions[rid],
+        project.recolors,
+        merges,
+      )
+      return (pal[ci]?.lab ?? [0, 0, 0]) as [number, number, number]
+    }
+  }, [pattern, project.recolors, merges])
+
   const plan = useMemo(
     () =>
       pattern && view === 'path'
-        ? buildTuftPath(pattern, { skipRegion })
+        ? buildTuftPath(pattern, {
+            skipRegion,
+            refine: sourceRaster
+              ? { source: sourceRaster, colorLabOf, factor: 3 }
+              : undefined,
+          })
         : null,
-    [pattern, view, skipRegion],
+    [pattern, view, skipRegion, sourceRaster, colorLabOf],
   )
 
   const effIndex = useMemo(

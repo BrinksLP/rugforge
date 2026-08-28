@@ -7,6 +7,10 @@
  * into that path:
  *
  *   region cells
+ *     -> (optional) upsample the region grid and snap the boundary band
+ *        to the colour it actually matches in the ORIGINAL image, so the
+ *        outline follows the photo edge to within ~1 stitch instead of
+ *        the k-means-on-a-coarse-grid staircase
  *     -> boundary trace (unit edges) -> closed loops
  *     -> RDP simplify + Chaikin corner-cutting  (curvy outline, no stairs)
  *     -> vertical scan-line fill in serpentine order, bottom pass first;
@@ -23,9 +27,11 @@
  * ------------------------------------------------------------------ */
 
 import type { Pattern } from '../types'
-import { isLightHex } from './color'
+import { isLightHex, labDist2, rgbToLab, type Lab } from './color'
 
 export type Pt = [number, number]
+
+const EMPTY = -1
 
 export interface RegionPath {
   regionId: number
@@ -50,11 +56,23 @@ export interface TuftPlan {
   totalTravelCm: number
 }
 
+export interface RefineInput {
+  /** rasterised source (crop + mask already applied), covering the same
+   *  area as the stitch grid */
+  source: ImageData
+  /** effective Lab colour of a region id (honours recolours / merges) */
+  colorLabOf: (regionId: number) => Lab
+  /** boundary-grid upsample factor (default 3, capped 1..6) */
+  factor?: number
+}
+
 export interface TuftOptions {
   /** fill line spacing; defaults to ~4.5 mm, snapped to the cell grid */
   rowSpacingCm?: number
   /** regions for which this returns true are not tufted (e.g. background) */
   skipRegion?: (regionId: number) => boolean
+  /** trace outlines from an image-refined boundary instead of the raw grid */
+  refine?: RefineInput
 }
 
 /* ---- geometry helpers ---------------------------------------- */
@@ -338,6 +356,78 @@ function serpentineFill(
   return strokes
 }
 
+/* ---- image-refined boundary grid ----------------------------- *
+ * Upsample the stitch grid by `factor` and, for every fine cell that
+ * sits in a 1-stitch band along a colour edge, re-assign it to whichever
+ * neighbouring region's colour the ORIGINAL image pixel there is closest
+ * to. Interior cells keep their parent. Result: the traced outline
+ * follows the photo edge, clamped to ±1 stitch of the committed grid.
+ * ------------------------------------------------------------------ */
+
+function refineGrid(
+  cells: Int32Array,
+  cols: number,
+  rows: number,
+  refine: RefineInput,
+): { fine: Int32Array; fcols: number; frows: number; factor: number } {
+  const factor = Math.max(1, Math.min(6, Math.round(refine.factor ?? 3)))
+  const fcols = cols * factor
+  const frows = rows * factor
+  const fine = new Int32Array(fcols * frows)
+  const { data, width: sw, height: sh } = refine.source
+
+  const regionAt = (cx: number, cy: number) =>
+    cx >= 0 && cy >= 0 && cx < cols && cy < rows ? cells[cy * cols + cx] : EMPTY
+
+  for (let fy = 0; fy < frows; fy++) {
+    const py = (fy / factor) | 0
+    const sy = Math.min(sh - 1, (((fy + 0.5) / frows) * sh) | 0)
+    for (let fx = 0; fx < fcols; fx++) {
+      const px = (fx / factor) | 0
+      const parent = cells[py * cols + px]
+      const fi = fy * fcols + fx
+      if (parent === EMPTY) {
+        fine[fi] = EMPTY
+        continue
+      }
+
+      let candidates: number[] | null = null
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue
+          const r = regionAt(px + dx, py + dy)
+          if (r === EMPTY || r === parent) continue
+          if (!candidates) candidates = [parent]
+          if (!candidates.includes(r)) candidates.push(r)
+        }
+      }
+      if (!candidates) {
+        fine[fi] = parent // interior — nothing to refine
+        continue
+      }
+
+      const sx = Math.min(sw - 1, (((fx + 0.5) / fcols) * sw) | 0)
+      const p = (sy * sw + sx) * 4
+      if (data[p + 3] < 128) {
+        fine[fi] = EMPTY
+        continue
+      }
+      const lab = rgbToLab(data[p], data[p + 1], data[p + 2])
+      let best = parent
+      let bd = Infinity
+      for (const r of candidates) {
+        const d = labDist2(lab, refine.colorLabOf(r))
+        if (d < bd) {
+          bd = d
+          best = r
+        }
+      }
+      fine[fi] = best
+    }
+  }
+  return { fine, fcols, frows, factor }
+}
+
 /* ---- assemble ---------------------------------------------- */
 
 export function buildTuftPath(
@@ -354,15 +444,31 @@ export function buildTuftPath(
   const skip = opts.skipRegion ?? (() => false)
   const kept = regions.filter((r) => !skip(r.id))
 
+  const refined = opts.refine
+    ? refineGrid(cells, cols, rows, opts.refine)
+    : null
+
   const paths: RegionPath[] = []
   let totalTravelCm = 0
 
   for (const region of kept) {
-    const rawOutline = traceOutline(cells, cols, rows, region.id)
+    let rawOutline = refined
+      ? traceOutline(refined.fine, refined.fcols, refined.frows, region.id)
+      : traceOutline(cells, cols, rows, region.id)
+    let div = refined ? refined.factor : 1
+    if (refined && rawOutline.length === 0) {
+      // region vanished from the refined band (tiny) — fall back to grid
+      rawOutline = traceOutline(cells, cols, rows, region.id)
+      div = 1
+    }
     const outline = rawOutline.map((loop) =>
-      chaikin(simplifyLoop(loop, OUTLINE_EPS), OUTLINE_SMOOTH).map(
-        ([x, y]): Pt => [x * cellCm, y * cellCm],
-      ),
+      chaikin(
+        simplifyLoop(
+          loop.map(([x, y]): Pt => [x / div, y / div]),
+          OUTLINE_EPS,
+        ),
+        OUTLINE_SMOOTH,
+      ).map(([x, y]): Pt => [x * cellCm, y * cellCm]),
     )
     const outlineLenCm = outline.reduce((s, l) => s + loopLen(l), 0)
 

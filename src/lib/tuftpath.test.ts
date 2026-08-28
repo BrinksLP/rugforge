@@ -131,6 +131,56 @@ describe('travelByColor', () => {
   })
 })
 
+describe('image-refined outline', () => {
+  // stitch grid: region 0 for x<5, region 1 for x>=5 (split at x=5)
+  const cols = 10
+  const rows = 6
+  const cells = new Int32Array(cols * rows)
+  for (let y = 0; y < rows; y++)
+    for (let x = 0; x < cols; x++) cells[y * cols + x] = x < 5 ? 0 : 1
+  const pattern: Pattern = {
+    cols,
+    rows,
+    cells,
+    regions: [
+      region(0, 0, [0, 0, 4, rows - 1], 5 * rows),
+      region(1, 1, [5, 0, 9, rows - 1], 5 * rows),
+    ],
+    palette: [
+      { index: 0, hex: '#3c3c3c', lab: [25, 0, 0], name: 'dunkel' },
+      { index: 1, hex: '#ebebeb', lab: [93, 0, 0], name: 'hell' },
+    ],
+    cellSizeMm: 10,
+  }
+  // source: the real colour edge sits at x=12/30 = stitch 4, left of the grid split
+  const sw = 30
+  const sh = 18
+  const data = new Uint8ClampedArray(sw * sh * 4)
+  for (let y = 0; y < sh; y++)
+    for (let x = 0; x < sw; x++) {
+      const i = (y * sw + x) * 4
+      const v = x < 12 ? 60 : 235
+      data[i] = data[i + 1] = data[i + 2] = v
+      data[i + 3] = 255
+    }
+  const source = { width: sw, height: sh, data } as ImageData
+  const colorLabOf = (rid: number) =>
+    pattern.palette[pattern.regions[rid].colorIndex].lab
+
+  const minX = (p: ReturnType<typeof buildTuftPath>['paths'][number]) =>
+    Math.min(...p.outline.flat().map(([x]) => x))
+
+  it('pulls the region edge toward the photo edge', () => {
+    const plain = buildTuftPath(pattern).paths.find((p) => p.regionId === 1)!
+    const refined = buildTuftPath(pattern, {
+      refine: { source, colorLabOf, factor: 3 },
+    }).paths.find((p) => p.regionId === 1)!
+
+    expect(minX(plain)).toBeGreaterThan(4.7) // ~5 cm, the grid split
+    expect(minX(refined)).toBeLessThan(4.7) // moved left toward x=4
+  })
+})
+
 describe('background regions', () => {
   const cols = 6
   const rows = 4

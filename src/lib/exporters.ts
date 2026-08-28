@@ -29,6 +29,32 @@ function bgFor(pattern: Pattern, project: Project) {
   return { set, skipRegion }
 }
 
+/** image-refine options for the path outline, if a source raster is given */
+function refineFor(
+  pattern: Pattern,
+  project: Project,
+  sourceRaster?: ImageData | null,
+) {
+  if (!sourceRaster) return undefined
+  const merges = project.colorMerges ?? {}
+  return {
+    source: sourceRaster,
+    factor: 3,
+    colorLabOf: (rid: number) => {
+      const ci = effectiveColorIndex(
+        pattern.regions[rid],
+        project.recolors,
+        merges,
+      )
+      return (pattern.palette[ci]?.lab ?? [0, 0, 0]) as [
+        number,
+        number,
+        number,
+      ]
+    },
+  }
+}
+
 function triggerDownload(dataUrl: string, filename: string) {
   const a = document.createElement('a')
   a.href = dataUrl
@@ -51,13 +77,18 @@ export function exportPatternPng(
     cellPx?: number
     /** draw the tufting path instead of the stitch grid */
     pathMode?: boolean
+    /** rasterised source for image-refined path outlines */
+    sourceRaster?: ImageData | null
   },
 ) {
   const cellPx = opts.cellPx ?? 22
   const bg = bgFor(pattern, project)
 
   if (opts.pathMode) {
-    const plan = buildTuftPath(pattern, { skipRegion: bg.skipRegion })
+    const plan = buildTuftPath(pattern, {
+      skipRegion: bg.skipRegion,
+      refine: refineFor(pattern, project, opts.sourceRaster),
+    })
     const cv = document.createElement('canvas')
     cv.width = pattern.cols * cellPx
     cv.height = pattern.rows * cellPx
@@ -127,6 +158,7 @@ export function legendRows(pattern: Pattern, project: Project): LegendRow[] {
 function drawOverview(
   pattern: Pattern,
   project: Project,
+  sourceRaster?: ImageData | null,
 ): HTMLCanvasElement {
   const W = 1240 // ~A4 @ 150dpi
   const H = 1754
@@ -240,7 +272,10 @@ function drawOverview(
   }
 
   // tufting path length + yarn-from-travel estimate
-  const plan = buildTuftPath(pattern, { skipRegion: bg.skipRegion })
+  const plan = buildTuftPath(pattern, {
+    skipRegion: bg.skipRegion,
+    refine: refineFor(pattern, project, sourceRaster),
+  })
   const travelM = plan.totalTravelCm / 100
   const travelYarn = yarnFromTravel({
     travelCm: plan.totalTravelCm,
@@ -279,13 +314,21 @@ function drawOverview(
   return cv
 }
 
-export function exportOverviewPng(pattern: Pattern, project: Project) {
-  const cv = drawOverview(pattern, project)
+export function exportOverviewPng(
+  pattern: Pattern,
+  project: Project,
+  sourceRaster?: ImageData | null,
+) {
+  const cv = drawOverview(pattern, project, sourceRaster)
   triggerDownload(cv.toDataURL('image/png'), `${slug(project.name)}-uebersicht.png`)
 }
 
-export function exportOverviewPdf(pattern: Pattern, project: Project) {
-  const cv = drawOverview(pattern, project)
+export function exportOverviewPdf(
+  pattern: Pattern,
+  project: Project,
+  sourceRaster?: ImageData | null,
+) {
+  const cv = drawOverview(pattern, project, sourceRaster)
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
   pdf.addImage(cv.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297)
   pdf.save(`${slug(project.name)}-uebersicht.pdf`)

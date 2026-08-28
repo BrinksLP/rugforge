@@ -60,6 +60,9 @@ interface EditorState {
   mask: HTMLCanvasElement | null
 
   pattern: Pattern | null
+  /** the rasterised source (crop + mask) the current pattern was built
+   *  from — reused to refine the tufting-path outlines against the image */
+  sourceRaster: ImageData | null
   computing: boolean
   /** size / settings changed since the last pattern build */
   patternStale: boolean
@@ -112,6 +115,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   sourceImage: null,
   mask: null,
   pattern: null,
+  sourceRaster: null,
   computing: false,
   patternStale: true,
   history: [],
@@ -127,6 +131,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       step: 0,
       maxStepReached: p.imageDataUrl ? 4 : 0,
       pattern: null,
+      sourceRaster: null,
       patternStale: true,
       history: [],
       future: [],
@@ -144,6 +149,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       sourceImage: null,
       mask: null,
       pattern: null,
+      sourceRaster: null,
       patternStale: true,
       history: [],
       future: [],
@@ -330,6 +336,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         bg.length !== (project.bgColors ?? []).length
       set({
         pattern,
+        sourceRaster: src,
         patternStale: false,
         computing: false,
         ...(changed
