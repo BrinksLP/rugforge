@@ -2,9 +2,11 @@
  * The image -> pattern pipeline.
  *
  *   source image (already cropped + masked)
- *     -> downscale to the stitch grid          (1 cell = 1 stitch)
- *     -> Lab k-means colour reduction (<= 10)
- *     -> majority-filter smoothing
+ *     -> fit a Lab k-means palette (<= 10) on a pixel subsample
+ *     -> per stitch cell: majority vote of its source footprint against
+ *        that palette   (1 cell = 1 stitch; majority, not average, so
+ *        edges stay crisp instead of blending into a mis-classified band)
+ *     -> majority-filter smoothing + single-cell staircase removal
  *     -> connected-component regions
  *     -> small-area cleanup (merge islands into largest neighbour)
  *     -> palette + region list
@@ -15,7 +17,7 @@
  * is nudged down.
  * ------------------------------------------------------------------ */
 
-import { labToHex, rgbToLab, type Lab } from './color'
+import { labDist2, labToHex, rgbToLab, type Lab } from './color'
 import { kmeansLab } from './kmeans'
 import type { Pattern, PaletteColor, PatternSettings, Region } from '../types'
 
@@ -31,21 +33,40 @@ export interface BuildInput {
   settings: PatternSettings
 }
 
-/* ---- 1. downscale to the grid ----------------------------------- */
+/* ---- 1. fit palette, then assign each cell by majority vote ----- *
+ * One k-means fit on a subsample of source pixels, then every stitch
+ * cell takes the *majority* palette colour over its source footprint.
+ * Majority instead of average is what keeps edges crisp: a cell that is
+ * 70% frame / 30% background becomes solidly "frame" rather than a
+ * blend that lands between two centres and flips cell-to-cell along the
+ * edge — the ragged-border effect at low colour counts.
+ * ------------------------------------------------------------------ */
 
-interface Grid {
-  cols: number
-  rows: number
-  /** Lab per cell, flat triples; undefined where masked */
-  lab: Float64Array
-  /** 1 = real cell, 0 = masked out */
-  present: Uint8Array
+function fitPalette(src: ImageData, k: number): Lab[] {
+  const { width: sw, height: sh, data } = src
+  const stride = Math.max(1, Math.round(Math.sqrt((sw * sh) / FIT_SAMPLE_CAP)))
+  const samples: number[] = []
+  for (let y = 0; y < sh; y += stride) {
+    for (let x = 0; x < sw; x += stride) {
+      const i = (y * sw + x) * 4
+      if (data[i + 3] < 128) continue
+      const [L, a, b] = rgbToLab(data[i], data[i + 1], data[i + 2])
+      samples.push(L, a, b)
+    }
+  }
+  if (samples.length < 3) return [[0, 0, 0]]
+  return kmeansLab(Float64Array.from(samples), k).centers
 }
 
-function downscale(src: ImageData, cols: number, rows: number): Grid {
+function assignCells(
+  src: ImageData,
+  cols: number,
+  rows: number,
+  centers: Lab[],
+): Int32Array {
   const { width: sw, height: sh, data } = src
-  const lab = new Float64Array(cols * rows * 3)
-  const present = new Uint8Array(cols * rows)
+  const cluster = new Int32Array(cols * rows).fill(EMPTY)
+  const votes = new Int32Array(centers.length)
 
   for (let gy = 0; gy < rows; gy++) {
     const y0 = Math.floor((gy * sh) / rows)
@@ -54,85 +75,46 @@ function downscale(src: ImageData, cols: number, rows: number): Grid {
       const x0 = Math.floor((gx * sw) / cols)
       const x1 = Math.max(x0 + 1, Math.floor(((gx + 1) * sw) / cols))
 
-      let r = 0
-      let g = 0
-      let b = 0
-      let a = 0
-      let n = 0
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
+      // sub-sample the footprint: at most ~6x6 lookups per cell
+      const sx = Math.max(1, Math.floor((x1 - x0) / 6))
+      const sy = Math.max(1, Math.floor((y1 - y0) / 6))
+
+      votes.fill(0)
+      let opaque = 0
+      let total = 0
+      for (let y = y0; y < y1; y += sy) {
+        for (let x = x0; x < x1; x += sx) {
+          total++
           const i = (y * sw + x) * 4
-          const alpha = data[i + 3]
-          if (alpha < 128) continue
-          r += data[i]
-          g += data[i + 1]
-          b += data[i + 2]
-          a += alpha
-          n++
+          if (data[i + 3] < 128) continue
+          opaque++
+          const p = rgbToLab(data[i], data[i + 1], data[i + 2])
+          let best = 0
+          let bestD = Infinity
+          for (let c = 0; c < centers.length; c++) {
+            const d = labDist2(p, centers[c])
+            if (d < bestD) {
+              bestD = d
+              best = c
+            }
+          }
+          votes[best]++
         }
       }
-      const gi = gy * cols + gx
-      const boxArea = (x1 - x0) * (y1 - y0)
-      if (n === 0 || n < boxArea * 0.4) {
-        present[gi] = 0
-        continue
+      if (opaque === 0 || opaque < total * 0.4) continue
+
+      let best = 0
+      let bestN = -1
+      for (let c = 0; c < centers.length; c++) {
+        if (votes[c] > bestN) {
+          bestN = votes[c]
+          best = c
+        }
       }
-      present[gi] = 1
-      const [L, aa, bb] = rgbToLab(r / n, g / n, b / n)
-      lab[gi * 3] = L
-      lab[gi * 3 + 1] = aa
-      lab[gi * 3 + 2] = bb
-      void a
+      cluster[gy * cols + gx] = best
     }
   }
-  return { cols, rows, lab, present }
-}
-
-/* ---- 2. colour reduction -------------------------------------- */
-
-function quantise(
-  grid: Grid,
-  k: number,
-): { centers: Lab[]; cluster: Int32Array } {
-  const total = grid.cols * grid.rows
-  const idx: number[] = []
-  for (let i = 0; i < total; i++) if (grid.present[i]) idx.push(i)
-
-  // fit on a subsample when the grid is huge, then assign every cell
-  const stride = Math.max(1, Math.ceil(idx.length / FIT_SAMPLE_CAP))
-  const fitCount = Math.ceil(idx.length / stride)
-  const samples = new Float64Array(fitCount * 3)
-  for (let s = 0, j = 0; s < idx.length; s += stride, j++) {
-    const gi = idx[s]
-    samples[j * 3] = grid.lab[gi * 3]
-    samples[j * 3 + 1] = grid.lab[gi * 3 + 1]
-    samples[j * 3 + 2] = grid.lab[gi * 3 + 2]
-  }
-
-  const { centers } = kmeansLab(samples, k)
-
-  const cluster = new Int32Array(total).fill(EMPTY)
-  for (const gi of idx) {
-    const p: Lab = [
-      grid.lab[gi * 3],
-      grid.lab[gi * 3 + 1],
-      grid.lab[gi * 3 + 2],
-    ]
-    let best = 0
-    let bestD = Infinity
-    for (let c = 0; c < centers.length; c++) {
-      const dL = p[0] - centers[c][0]
-      const da = p[1] - centers[c][1]
-      const db = p[2] - centers[c][2]
-      const d = dL * dL + da * da + db * db
-      if (d < bestD) {
-        bestD = d
-        best = c
-      }
-    }
-    cluster[gi] = best
-  }
-  return { centers, cluster }
+  return cluster
 }
 
 /* ---- 3. smoothing (majority filter) ---------------------------- */
@@ -172,6 +154,57 @@ function smooth(
       }
     }
     cluster.set(next)
+  }
+}
+
+/* ---- 3b. staircase removal ----------------------------------- *
+ * Flip a cell only when 3+ of its 4 orthogonal neighbours agree on one
+ * other colour. That erases single-cell steps and notches along an
+ * edge without rounding corners or eroding anything thicker than one
+ * cell (a 4-cell-wide frame keeps its edges; its outer cells see just
+ * one differing neighbour). This is what actually straightens the
+ * ragged borders you get at low colour counts.
+ * ------------------------------------------------------------------ */
+
+function antiJag(
+  cluster: Int32Array,
+  cols: number,
+  rows: number,
+  passes: number,
+): void {
+  for (let p = 0; p < passes; p++) {
+    const next = cluster.slice()
+    let changed = 0
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const i = y * cols + x
+        const cur = cluster[i]
+        if (cur === EMPTY) continue
+        let other = EMPTY
+        let agree = 0
+        let differ = 0
+        const ns = [
+          y > 0 ? cluster[i - cols] : EMPTY,
+          y < rows - 1 ? cluster[i + cols] : EMPTY,
+          x > 0 ? cluster[i - 1] : EMPTY,
+          x < cols - 1 ? cluster[i + 1] : EMPTY,
+        ]
+        for (const n of ns) {
+          if (n === EMPTY || n === cur) continue
+          differ++
+          if (other === EMPTY || n === other) {
+            other = n
+            agree++
+          }
+        }
+        if (agree >= 3 && differ === agree) {
+          next[i] = other
+          changed++
+        }
+      }
+    }
+    cluster.set(next)
+    if (changed === 0) break
   }
 }
 
@@ -319,12 +352,13 @@ function cleanup(
 export function buildPattern(input: BuildInput): Pattern {
   const { source, cols, rows, cellSizeMm, settings } = input
 
-  const grid = downscale(source, cols, rows)
   const k = Math.max(2, Math.min(10, settings.colorCount))
-  const { centers, cluster } = quantise(grid, k)
+  const centers = fitPalette(source, k)
+  const cluster = assignCells(source, cols, rows, centers)
 
   smooth(cluster, cols, rows, settings.smoothing)
   cleanup(cluster, cols, rows, settings.minRegionStitches)
+  antiJag(cluster, cols, rows, settings.smoothing > 0 ? 2 : 1)
   smooth(cluster, cols, rows, settings.smoothing > 0 ? 1 : 0)
 
   const { cells, regions } = label(cluster, cols, rows)
