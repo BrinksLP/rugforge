@@ -38,6 +38,8 @@ export function StepPattern() {
   const setBackground = useEditor((s) => s.setBackground)
   const setPathSmoothing = useEditor((s) => s.setPathSmoothing)
   const resetAdjustments = useEditor((s) => s.resetAdjustments)
+  const undo = useEditor((s) => s.undo)
+  const lastSnapshot = useEditor((s) => s.history[s.history.length - 1])
   const goStep = useEditor((s) => s.goStep)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -452,16 +454,13 @@ export function StepPattern() {
           <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[#e9d8b6] bg-[#fdf6e7] px-3 py-2 text-sm text-warn">
             <span>{tooSmall} sehr kleine Fläche(n) übrig.</span>
             <div className="flex shrink-0 gap-1">
-              {project.settings.minRegionStitches > 1 ? (
+              {lastSnapshot &&
+              lastSnapshot.settings.minRegionStitches <
+                project.settings.minRegionStitches ? (
                 <Button
                   variant="ghost"
-                  onClick={() =>
-                    setSetting(
-                      'minRegionStitches',
-                      Math.max(1, project.settings.minRegionStitches - 6),
-                    )
-                  }
-                  title="Schwelle wieder senken"
+                  onClick={undo}
+                  title="Letztes Zusammenführen rückgängig machen"
                 >
                   Rückgängig
                 </Button>
