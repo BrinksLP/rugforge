@@ -389,12 +389,35 @@ function MaskPreview({
     dst.height = h
     const ctx = dst.getContext('2d')!
     ctx.clearRect(0, 0, w, h)
-    // tint the REMOVED area (where the mask is transparent)
-    ctx.fillStyle = 'rgba(120,120,130,0.55)'
+
+    // turquoise wash over the area that will be KEPT (mask = opaque)
+    ctx.fillStyle = 'rgba(45, 212, 191, 0.22)'
     ctx.fillRect(0, 0, w, h)
-    ctx.globalCompositeOperation = 'destination-out'
+    ctx.globalCompositeOperation = 'destination-in'
     ctx.drawImage(canvas, 0, 0, w, h)
     ctx.globalCompositeOperation = 'source-over'
+
+    // darker contour: dilate the mask silhouette, subtract the original
+    const ring = document.createElement('canvas')
+    ring.width = w
+    ring.height = h
+    const rc = ring.getContext('2d')!
+    const r = 2
+    for (let a = 0; a < 8; a++) {
+      rc.drawImage(
+        canvas,
+        Math.round(r * Math.cos((a * Math.PI) / 4)),
+        Math.round(r * Math.sin((a * Math.PI) / 4)),
+        w,
+        h,
+      )
+    }
+    rc.globalCompositeOperation = 'destination-out'
+    rc.drawImage(canvas, 0, 0, w, h)
+    rc.globalCompositeOperation = 'source-in'
+    rc.fillStyle = 'rgba(13, 148, 136, 0.9)'
+    rc.fillRect(0, 0, w, h)
+    ctx.drawImage(ring, 0, 0)
   })
   return (
     <canvas
