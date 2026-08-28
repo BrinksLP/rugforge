@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTuftPath, travelByColor } from './tuftpath'
+import { borderColorIndex, buildTuftPath, travelByColor } from './tuftpath'
 import type { Pattern, Region } from '../types'
 
 function region(
@@ -84,5 +84,48 @@ describe('travelByColor', () => {
     const plan = buildTuftPath(rectPattern(8, 8))
     const t = travelByColor(plan, rectPattern(8, 8), () => 0)
     expect(t[0]).toBeCloseTo(plan.totalTravelCm, 5)
+  })
+})
+
+describe('background regions', () => {
+  const cols = 6
+  const rows = 4
+  const cells = new Int32Array(cols * rows)
+  // region 1 = a 2x2 object in the middle, region 0 = everything else (border)
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      cells[y * cols + x] = x >= 2 && x <= 3 && y >= 1 && y <= 2 ? 1 : 0
+    }
+  }
+  const pattern: Pattern = {
+    cols,
+    rows,
+    cells,
+    regions: [
+      region(0, 0, [0, 0, cols - 1, rows - 1], cols * rows - 4),
+      region(1, 1, [2, 1, 3, 2], 4),
+    ],
+    palette: [
+      { index: 0, hex: '#eeeeee', lab: [93, 0, 0], name: 'bg' },
+      { index: 1, hex: '#993333', lab: [35, 30, 15], name: 'objekt' },
+    ],
+    cellSizeMm: 10,
+  }
+
+  it('borderColorIndex finds the colour on the edge', () => {
+    expect(borderColorIndex(pattern, (rid) => pattern.regions[rid].colorIndex)).toBe(0)
+  })
+
+  it('skipRegion drops it from the path entirely', () => {
+    const plan = buildTuftPath(pattern, {
+      skipRegion: (rid) => pattern.regions[rid].colorIndex === 0,
+    })
+    expect(plan.paths).toHaveLength(1)
+    expect(plan.paths[0].regionId).toBe(1)
+    expect(plan.order).toEqual([1])
+    expect(plan.totalTravelCm).toBeCloseTo(
+      plan.paths[0].outlineLenCm + plan.paths[0].fillLenCm,
+      5,
+    )
   })
 })

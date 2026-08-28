@@ -32,5 +32,6 @@ export async function importProjectFile(file: File): Promise<Project> {
   // shallow migration hook
   if (data.version !== 1) data.version = 1
   if (!data.colorMerges) data.colorMerges = {}
+  if (!data.bgColors) data.bgColors = []
   return data as Project
 }

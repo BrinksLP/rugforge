@@ -52,6 +52,8 @@ export interface TuftPlan {
 export interface TuftOptions {
   /** fill line spacing; defaults to ~4.5 mm, snapped to the cell grid */
   rowSpacingCm?: number
+  /** regions for which this returns true are not tufted (e.g. background) */
+  skipRegion?: (regionId: number) => boolean
 }
 
 /* ---- geometry helpers ---------------------------------------- */
@@ -241,10 +243,13 @@ export function buildTuftPath(
   const spacingCells = Math.max(1, Math.round(wantCm / cellCm))
   const rowSpacingCm = spacingCells * cellCm
 
+  const skip = opts.skipRegion ?? (() => false)
+  const kept = regions.filter((r) => !skip(r.id))
+
   const paths: RegionPath[] = []
   let totalTravelCm = 0
 
-  for (const region of regions) {
+  for (const region of kept) {
     const rawOutline = traceOutline(cells, cols, rows, region.id)
     const outline = rawOutline.map((loop) =>
       chaikin(loop, 2).map(([x, y]): Pt => [x * cellCm, y * cellCm]),
@@ -272,7 +277,7 @@ export function buildTuftPath(
   // suggested order: light colours before dark (dark laid later hides
   // the seams), larger regions before small detail within a colour.
   const lightRank = palette.map((c) => (isLightHex(c.hex) ? 0 : 1))
-  const order = [...regions]
+  const order = [...kept]
     .sort((a, b) => {
       const lr = lightRank[a.colorIndex] - lightRank[b.colorIndex]
       if (lr !== 0) return lr
@@ -282,6 +287,37 @@ export function buildTuftPath(
     .map((r) => r.id)
 
   return { paths, order, rowSpacingCm, totalTravelCm }
+}
+
+/** palette colour covering the most border cells — the background guess */
+export function borderColorIndex(
+  pattern: Pattern,
+  effIndex: (regionId: number) => number,
+): number | null {
+  const { cols, rows, cells } = pattern
+  const count = new Map<number, number>()
+  const bump = (rid: number) => {
+    if (rid < 0) return
+    const ci = effIndex(rid)
+    count.set(ci, (count.get(ci) ?? 0) + 1)
+  }
+  for (let x = 0; x < cols; x++) {
+    bump(cells[x])
+    bump(cells[(rows - 1) * cols + x])
+  }
+  for (let y = 0; y < rows; y++) {
+    bump(cells[y * cols])
+    bump(cells[y * cols + cols - 1])
+  }
+  let best: number | null = null
+  let bn = 0
+  for (const [ci, n] of count) {
+    if (n > bn) {
+      bn = n
+      best = ci
+    }
+  }
+  return best
 }
 
 /** travel (outline + fill) per palette colour, honouring recolours + merges */

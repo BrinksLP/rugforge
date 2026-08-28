@@ -140,6 +140,13 @@ export interface Project {
    * collapse near-duplicate swatches into one yarn. Chains are followed.
    */
   colorMerges: Record<number, number>
+  /**
+   * palette indices marked "not tufted" — e.g. the leftover image
+   * background. Excluded from the path, the area/yarn totals and the
+   * legend. Stored resolved-through-merges is not required; callers
+   * resolve on read.
+   */
+  bgColors: number[]
   setupProfile: SetupProfile
   businessProfile: BusinessProfile
   /** schema version for future migrations */

@@ -6,8 +6,13 @@ import {
   areaByColor,
   effectiveColorIndex,
   resolveMergedColor,
+  resolvedSet,
 } from '../../lib/pattern'
-import { buildTuftPath, travelByColor } from '../../lib/tuftpath'
+import {
+  borderColorIndex,
+  buildTuftPath,
+  travelByColor,
+} from '../../lib/tuftpath'
 import { yarnFromTravel } from '../../lib/calc'
 import type { PatternPreset } from '../../types'
 
@@ -29,6 +34,7 @@ export function StepPattern() {
   const clearRecolor = useEditor((s) => s.clearRecolor)
   const mergeColors = useEditor((s) => s.mergeColors)
   const unmergeColor = useEditor((s) => s.unmergeColor)
+  const setBackground = useEditor((s) => s.setBackground)
   const resetAdjustments = useEditor((s) => s.resetAdjustments)
   const goStep = useEditor((s) => s.goStep)
 
@@ -56,19 +62,39 @@ export function StepPattern() {
     [project.colorMerges],
   )
 
-  const areas = useMemo(
-    () => (pattern ? areaByColor(pattern, project.recolors, merges) : []),
-    [pattern, project.recolors, merges],
+  const bgSet = useMemo(
+    () => resolvedSet(project.bgColors, merges),
+    [project.bgColors, merges],
   )
 
-  const activePalette = useMemo(
+  const areas = useMemo(
+    () =>
+      pattern ? areaByColor(pattern, project.recolors, merges, bgSet) : [],
+    [pattern, project.recolors, merges, bgSet],
+  )
+
+  // non-merged swatches, split into "will be tufted" and "background"
+  const tuftPalette = useMemo(
     () =>
       pattern
         ? pattern.palette.filter(
-            (c) => resolveMergedColor(c.index, merges) === c.index,
+            (c) =>
+              resolveMergedColor(c.index, merges) === c.index &&
+              !bgSet.has(c.index),
           )
         : [],
-    [pattern, merges],
+    [pattern, merges, bgSet],
+  )
+  const bgPalette = useMemo(
+    () =>
+      pattern
+        ? pattern.palette.filter(
+            (c) =>
+              resolveMergedColor(c.index, merges) === c.index &&
+              bgSet.has(c.index),
+          )
+        : [],
+    [pattern, merges, bgSet],
   )
   const mergedPalette = useMemo(
     () =>
@@ -80,9 +106,27 @@ export function StepPattern() {
     [pattern, merges],
   )
 
+  const skipRegion = useMemo(
+    () =>
+      pattern
+        ? (rid: number) =>
+            bgSet.has(
+              effectiveColorIndex(
+                pattern.regions[rid],
+                project.recolors,
+                merges,
+              ),
+            )
+        : () => false,
+    [pattern, project.recolors, merges, bgSet],
+  )
+
   const plan = useMemo(
-    () => (pattern && view === 'path' ? buildTuftPath(pattern) : null),
-    [pattern, view],
+    () =>
+      pattern && view === 'path'
+        ? buildTuftPath(pattern, { skipRegion })
+        : null,
+    [pattern, view, skipRegion],
   )
 
   const effIndex = useMemo(
@@ -116,6 +160,7 @@ export function StepPattern() {
         mirror,
         recolors: project.recolors,
         merges,
+        bgColors: bgSet,
         highlight,
         showOrder: true,
       })
@@ -127,10 +172,21 @@ export function StepPattern() {
         mirror,
         recolors: project.recolors,
         merges,
+        bgColors: bgSet,
         highlight,
       })
     }
-  }, [pattern, plan, view, showGrid, mirror, highlight, project.recolors, merges])
+  }, [
+    pattern,
+    plan,
+    view,
+    showGrid,
+    mirror,
+    highlight,
+    project.recolors,
+    merges,
+    bgSet,
+  ])
 
   function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!pattern) return
@@ -226,7 +282,7 @@ export function StepPattern() {
         {pattern ? (
           <p className="mt-2 text-xs text-ink-soft">
             {pattern.cols} × {pattern.rows} Stiche · {pattern.regions.length}{' '}
-            Flächen · {activePalette.length} Farben
+            Flächen · {tuftPalette.length} Farben
             {mergedPalette.length ? ` (${mergedPalette.length} verschmolzen)` : ''}.
             Klicke eine Fläche an, um sie umzufärben.
           </p>
@@ -246,7 +302,7 @@ export function StepPattern() {
               Kalibriertest in Iteration 4).
             </p>
             <ul className="mt-3 space-y-1.5 text-sm">
-              {activePalette.map((c) => {
+              {tuftPalette.map((c) => {
                 const cm = travel[c.index] ?? 0
                 const { lengthM, weightG } = yarnFromTravel({
                   travelCm: cm,
@@ -276,7 +332,7 @@ export function StepPattern() {
                 {(plan.totalTravelCm / 100).toFixed(1)} m Weg
               </span>
               <span className="w-24 text-right">
-                {activePalette
+                {tuftPalette
                   .reduce(
                     (s, c) =>
                       s +
@@ -403,7 +459,7 @@ export function StepPattern() {
             ) : null}
           </div>
           <ul className="mt-3 space-y-1.5">
-            {activePalette.map((c) => {
+            {tuftPalette.map((c) => {
               const stitches = areas[c.index] ?? 0
               const cm2 = stitches * cellCm * cellCm
               const selected = highlight === c.index
@@ -426,32 +482,45 @@ export function StepPattern() {
                     </span>
                   </button>
 
-                  {selected && activePalette.length > 1 ? (
-                    <div className="mt-1.5 rounded-[8px] bg-canvas px-2 py-2">
-                      <p className="mb-1.5 text-xs text-ink-soft">
-                        Farbe {c.index + 1} verschmelzen mit:
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {activePalette
-                          .filter((t) => t.index !== c.index)
-                          .map((t) => (
-                            <button
-                              key={t.index}
-                              onClick={() => {
-                                mergeColors(c.index, t.index)
-                                setHighlight(null)
-                              }}
-                              className="flex items-center gap-1 rounded-[6px] border border-line bg-white px-1.5 py-1 text-xs hover:border-accent"
-                              title={`In Farbe ${t.index + 1} verschmelzen`}
-                            >
-                              <span
-                                className="h-4 w-4 rounded-[4px] border border-black/10"
-                                style={{ background: t.hex }}
-                              />
-                              {t.index + 1}
-                            </button>
-                          ))}
-                      </div>
+                  {selected ? (
+                    <div className="mt-1.5 space-y-2 rounded-[8px] bg-canvas px-2 py-2">
+                      {tuftPalette.length > 1 ? (
+                        <>
+                          <p className="text-xs text-ink-soft">
+                            Farbe {c.index + 1} verschmelzen mit:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {tuftPalette
+                              .filter((t) => t.index !== c.index)
+                              .map((t) => (
+                                <button
+                                  key={t.index}
+                                  onClick={() => {
+                                    mergeColors(c.index, t.index)
+                                    setHighlight(null)
+                                  }}
+                                  className="flex items-center gap-1 rounded-[6px] border border-line bg-white px-1.5 py-1 text-xs hover:border-accent"
+                                  title={`In Farbe ${t.index + 1} verschmelzen`}
+                                >
+                                  <span
+                                    className="h-4 w-4 rounded-[4px] border border-black/10"
+                                    style={{ background: t.hex }}
+                                  />
+                                  {t.index + 1}
+                                </button>
+                              ))}
+                          </div>
+                        </>
+                      ) : null}
+                      <button
+                        onClick={() => {
+                          setBackground(c.index, true)
+                          setHighlight(null)
+                        }}
+                        className="text-xs text-accent"
+                      >
+                        Als Hintergrund markieren (nicht tuften)
+                      </button>
                     </div>
                   ) : null}
                 </li>
@@ -496,6 +565,54 @@ export function StepPattern() {
               </ul>
             </div>
           ) : null}
+
+          <div className="mt-3 border-t border-line pt-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-ink-soft">
+                Hintergrund (nicht getuftet)
+              </p>
+              {pattern && bgPalette.length === 0 ? (
+                <button
+                  className="text-xs text-accent"
+                  onClick={() => {
+                    const bi = borderColorIndex(pattern, effIndex)
+                    if (bi != null) setBackground(bi, true)
+                  }}
+                >
+                  Randfläche erkennen
+                </button>
+              ) : null}
+            </div>
+            {bgPalette.length ? (
+              <ul className="mt-1.5 space-y-1">
+                {bgPalette.map((c) => (
+                  <li
+                    key={c.index}
+                    className="flex items-center gap-2 px-2 text-sm text-ink-soft"
+                  >
+                    <span
+                      className="h-4 w-4 shrink-0 rounded-[4px] border border-black/10 opacity-60"
+                      style={{ background: c.hex }}
+                    />
+                    <span>{c.index + 1}</span>
+                    <span className="text-xs">— wird nicht getuftet</span>
+                    <button
+                      className="ml-auto text-xs text-accent"
+                      onClick={() => setBackground(c.index, false)}
+                    >
+                      wieder tuften
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-1 text-xs text-ink-soft">
+                Leerer Rand um das Motiv? Farbe anklicken → „Als Hintergrund",
+                oder oben „Randfläche erkennen". Besser noch: im Schritt
+                Freistellen den Hintergrund entfernen.
+              </p>
+            )}
+          </div>
         </Card>
 
         {selectedRegion != null && pattern ? (
@@ -515,7 +632,7 @@ export function StepPattern() {
               bleibt, nur die Farbe ändert sich.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {activePalette.map((c) => (
+              {tuftPalette.map((c) => (
                 <button
                   key={c.index}
                   onClick={() => recolor(selectedRegion, c.index)}

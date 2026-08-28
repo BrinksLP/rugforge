@@ -17,6 +17,8 @@ export interface RenderOpts {
   recolors: Record<number, number>
   /** palette merges: paletteIndex -> paletteIndex it is folded into */
   merges?: Record<number, number>
+  /** resolved palette indices marked "not tufted" — drawn faint, no number */
+  bgColors?: Set<number>
   /** palette index to spotlight; others dimmed */
   highlight?: number | null
 }
@@ -30,8 +32,16 @@ export function drawPattern(
   p: Pattern,
   opts: RenderOpts,
 ): void {
-  const { cellPx, showGrid, showNumbers, mirror, recolors, merges, highlight } =
-    opts
+  const {
+    cellPx,
+    showGrid,
+    showNumbers,
+    mirror,
+    recolors,
+    merges,
+    bgColors,
+    highlight,
+  } = opts
   const W = p.cols * cellPx
   const H = p.rows * cellPx
 
@@ -57,7 +67,10 @@ export function drawPattern(
       const ci = colorOf[rid]
       const col = p.palette[ci]
       if (!col) continue
-      if (highlight != null && highlight >= 0 && ci !== highlight) {
+      const isBg = bgColors?.has(ci) ?? false
+      if (isBg) {
+        ctx.globalAlpha = 0.1
+      } else if (highlight != null && highlight >= 0 && ci !== highlight) {
         ctx.globalAlpha = 0.12
       } else {
         ctx.globalAlpha = 1
@@ -110,7 +123,7 @@ export function drawPattern(
         if (rid < 0) continue
         const ci = colorOf[rid]
         const col = p.palette[ci]
-        if (!col) continue
+        if (!col || bgColors?.has(ci)) continue
         ctx.fillStyle = isLightHex(col.hex) ? '#00000099' : '#ffffffcc'
         ctx.fillText(
           String(ci + 1),
@@ -140,6 +153,8 @@ export interface TuftDrawOpts {
   mirror: boolean
   recolors: Record<number, number>
   merges?: Record<number, number>
+  /** resolved palette indices not being tufted — no zone tint drawn */
+  bgColors?: Set<number>
   /** palette index to spotlight; others dimmed */
   highlight?: number | null
   /** number the regions in tufting order */
@@ -161,7 +176,7 @@ export function drawTuftPath(
   plan: TuftPlan,
   opts: TuftDrawOpts,
 ): void {
-  const { cellPx, mirror, recolors, merges, highlight } = opts
+  const { cellPx, mirror, recolors, merges, bgColors, highlight } = opts
   const W = p.cols * cellPx
   const H = p.rows * cellPx
   const pxPerCm = cellPx / (p.cellSizeMm / 10)
@@ -183,8 +198,9 @@ export function drawTuftPath(
     for (let x = 0; x < p.cols; x++) {
       const rid = p.cells[y * p.cols + x]
       if (rid < 0) continue
-      const col = p.palette[colorOf[rid]]
-      if (!col) continue
+      const ci = colorOf[rid]
+      const col = p.palette[ci]
+      if (!col || bgColors?.has(ci)) continue
       ctx.globalAlpha = 0.16
       ctx.fillStyle = col.hex
       ctx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx)

@@ -471,15 +471,28 @@ export function resolveMergedColor(
   return i
 }
 
-/** stitch count per palette colour, honouring recolours + merges */
+/** resolve palette indices through merges into a Set of root indices */
+export function resolvedSet(
+  indices: readonly number[] | undefined,
+  merges: Record<number, number> = {},
+): Set<number> {
+  const s = new Set<number>()
+  for (const i of indices ?? []) s.add(resolveMergedColor(i, merges))
+  return s
+}
+
+/** stitch count per palette colour, honouring recolours + merges.
+ *  `skip` (resolved indices, e.g. background) contribute 0. */
 export function areaByColor(
   pattern: Pattern,
   recolors: Record<number, number>,
   merges: Record<number, number> = {},
+  skip?: Set<number>,
 ): number[] {
   const out = new Array(pattern.palette.length).fill(0)
   for (const r of pattern.regions) {
     const ci = effectiveColorIndex(r, recolors, merges)
+    if (skip?.has(ci)) continue
     out[ci] = (out[ci] ?? 0) + r.cellCount
   }
   return out

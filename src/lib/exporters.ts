@@ -8,10 +8,26 @@
 
 import { jsPDF } from 'jspdf'
 import { drawTuftPath, renderToCanvas, type RenderOpts } from './render'
-import { areaByColor, resolveMergedColor } from './pattern'
+import {
+  areaByColor,
+  effectiveColorIndex,
+  resolveMergedColor,
+  resolvedSet,
+} from './pattern'
 import { yarnEstimate, yarnFromTravel } from './calc'
 import { buildTuftPath } from './tuftpath'
 import type { Pattern, Project } from '../types'
+
+/** predicate + set for "colours not being tufted" (background) */
+function bgFor(pattern: Pattern, project: Project) {
+  const merges = project.colorMerges ?? {}
+  const set = resolvedSet(project.bgColors, merges)
+  const skipRegion = (rid: number) =>
+    set.has(
+      effectiveColorIndex(pattern.regions[rid], project.recolors, merges),
+    )
+  return { set, skipRegion }
+}
 
 function triggerDownload(dataUrl: string, filename: string) {
   const a = document.createElement('a')
@@ -38,9 +54,10 @@ export function exportPatternPng(
   },
 ) {
   const cellPx = opts.cellPx ?? 22
+  const bg = bgFor(pattern, project)
 
   if (opts.pathMode) {
-    const plan = buildTuftPath(pattern)
+    const plan = buildTuftPath(pattern, { skipRegion: bg.skipRegion })
     const cv = document.createElement('canvas')
     cv.width = pattern.cols * cellPx
     cv.height = pattern.rows * cellPx
@@ -49,6 +66,7 @@ export function exportPatternPng(
       mirror: opts.mirror,
       recolors: project.recolors,
       merges: project.colorMerges,
+      bgColors: bg.set,
       highlight: null,
       showOrder: true,
     })
@@ -63,6 +81,7 @@ export function exportPatternPng(
     mirror: opts.mirror,
     recolors: project.recolors,
     merges: project.colorMerges,
+    bgColors: bg.set,
     highlight: null,
   })
   triggerDownload(cv.toDataURL('image/png'), `${slug(project.name)}-vorlage.png`)
@@ -81,10 +100,14 @@ export interface LegendRow {
 export function legendRows(pattern: Pattern, project: Project): LegendRow[] {
   const cellCm = pattern.cellSizeMm / 10
   const merges = project.colorMerges ?? {}
-  const areas = areaByColor(pattern, project.recolors, merges)
+  const bgSet = resolvedSet(project.bgColors, merges)
+  const areas = areaByColor(pattern, project.recolors, merges, bgSet)
   return pattern.palette
-    // drop swatches that were merged into another colour
-    .filter((c) => resolveMergedColor(c.index, merges) === c.index)
+    // drop swatches merged into another colour, or marked as background
+    .filter(
+      (c) =>
+        resolveMergedColor(c.index, merges) === c.index && !bgSet.has(c.index),
+    )
     .map((c) => {
       const stitches = areas[c.index] ?? 0
       const areaCm2 = stitches * cellCm * cellCm
@@ -132,6 +155,8 @@ function drawOverview(
     158,
   )
 
+  const bg = bgFor(pattern, project)
+
   // thumbnail
   const thumb = renderToCanvas(pattern, {
     cellPx: 6,
@@ -140,6 +165,7 @@ function drawOverview(
     mirror: false,
     recolors: project.recolors,
     merges: project.colorMerges,
+    bgColors: bg.set,
     highlight: null,
   })
   const maxW = W - 120
@@ -214,7 +240,7 @@ function drawOverview(
   }
 
   // tufting path length + yarn-from-travel estimate
-  const plan = buildTuftPath(pattern)
+  const plan = buildTuftPath(pattern, { skipRegion: bg.skipRegion })
   const travelM = plan.totalTravelCm / 100
   const travelYarn = yarnFromTravel({
     travelCm: plan.totalTravelCm,
@@ -299,6 +325,7 @@ export function exportTiledPdf(
     mirror: opts.mirror,
     recolors: project.recolors,
     merges: project.colorMerges,
+    bgColors: bgFor(pattern, project).set,
     highlight: null,
   })
   const fullPxPerMm = cellPx / cellMm

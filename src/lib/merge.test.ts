@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { areaByColor, effectiveColorIndex, resolveMergedColor } from './pattern'
+import {
+  areaByColor,
+  effectiveColorIndex,
+  resolveMergedColor,
+  resolvedSet,
+} from './pattern'
 import type { Pattern, Region } from '../types'
 
 function makePattern(
@@ -76,6 +81,25 @@ describe('areaByColor with merges', () => {
 
   it('matches the unmerged totals when there are no merges', () => {
     expect(areaByColor(pattern, {})).toEqual([15, 20, 7])
+  })
+
+  it('skip set (background) contributes zero', () => {
+    const areas = areaByColor(pattern, {}, {}, new Set([0]))
+    expect(areas[0]).toBe(0)
+    expect(areas[1]).toBe(20)
+    expect(areas[2]).toBe(7)
+  })
+})
+
+describe('resolvedSet', () => {
+  it('resolves indices through merges', () => {
+    const s = resolvedSet([1, 3], { 1: 2 })
+    expect(s.has(2)).toBe(true)
+    expect(s.has(3)).toBe(true)
+    expect(s.has(1)).toBe(false)
+  })
+  it('is empty for undefined', () => {
+    expect(resolvedSet(undefined).size).toBe(0)
   })
 })
 
