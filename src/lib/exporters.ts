@@ -139,7 +139,8 @@ function drawOverview(
   ctx.fillText('Nr.        HEX            Fläche            Garn (Schätzung)', 110, y + 26)
   y += 40
 
-  for (const row of legendRows(pattern, project)) {
+  const rows = legendRows(pattern, project)
+  for (const row of rows) {
     ctx.fillStyle = row.hex
     ctx.fillRect(60, y, 34, 34)
     ctx.strokeStyle = '#00000022'
@@ -155,6 +156,38 @@ function drawOverview(
       y + 24,
     )
     y += 46
+  }
+
+  // totals row
+  const totalArea = rows.reduce((s, r) => s + r.areaCm2, 0)
+  const totalYarnG = rows.reduce(
+    (s, r) => s + (Number.isFinite(r.yarnG) ? r.yarnG : 0),
+    0,
+  )
+  ctx.strokeStyle = '#d9d9d6'
+  ctx.beginPath()
+  ctx.moveTo(60, y + 2)
+  ctx.lineTo(760, y + 2)
+  ctx.stroke()
+  y += 12
+  ctx.fillStyle = '#1f2328'
+  ctx.font = "bold 20px 'Inter', sans-serif"
+  ctx.fillText('Summe', 112, y + 24)
+  ctx.fillText(`${totalArea.toFixed(0)} cm²`, 360, y + 24)
+  ctx.fillText(`~ ${totalYarnG.toFixed(0)} g`, 560, y + 24)
+  y += 40
+
+  const runM = project.setupProfile.runLengthMPerG
+  if (runM) {
+    ctx.font = "18px 'Inter', sans-serif"
+    ctx.fillStyle = '#5b6470'
+    ctx.fillText(
+      `Garnlänge gesamt: ~ ${(totalYarnG * runM).toFixed(0)} m  ` +
+        `(bei ${runM} m/g)`,
+      112,
+      y + 20,
+    )
+    y += 34
   }
 
   y += 10

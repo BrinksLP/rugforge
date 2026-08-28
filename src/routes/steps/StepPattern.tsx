@@ -23,6 +23,7 @@ export function StepPattern() {
   const clearRecolor = useEditor((s) => s.clearRecolor)
   const mergeColors = useEditor((s) => s.mergeColors)
   const unmergeColor = useEditor((s) => s.unmergeColor)
+  const resetAdjustments = useEditor((s) => s.resetAdjustments)
   const goStep = useEditor((s) => s.goStep)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -180,7 +181,16 @@ export function StepPattern() {
 
       <div className="space-y-4">
         <Card className="p-5">
-          <h3 className="text-sm font-bold">Feineinstellung</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold">Feineinstellung</h3>
+            <button
+              className="text-xs text-accent"
+              onClick={resetAdjustments}
+              title="Regler auf das Preset, alle Umfärbungen und Verschmelzungen zurück"
+            >
+              Alles zurücksetzen
+            </button>
+          </div>
           <div className="mt-3 space-y-4">
             <Field
               label={`Farben: ${project.settings.colorCount}`}
@@ -228,17 +238,33 @@ export function StepPattern() {
         {tooSmall > 0 ? (
           <div className="flex items-center justify-between gap-3 rounded-[10px] border border-[#e9d8b6] bg-[#fdf6e7] px-3 py-2 text-sm text-warn">
             <span>{tooSmall} sehr kleine Fläche(n) übrig.</span>
-            <Button
-              variant="ghost"
-              onClick={() =>
-                setSetting(
-                  'minRegionStitches',
-                  Math.min(40, project.settings.minRegionStitches + 6),
-                )
-              }
-            >
-              Zusammenführen
-            </Button>
+            <div className="flex shrink-0 gap-1">
+              {project.settings.minRegionStitches > 1 ? (
+                <Button
+                  variant="ghost"
+                  onClick={() =>
+                    setSetting(
+                      'minRegionStitches',
+                      Math.max(1, project.settings.minRegionStitches - 6),
+                    )
+                  }
+                  title="Schwelle wieder senken"
+                >
+                  Rückgängig
+                </Button>
+              ) : null}
+              <Button
+                variant="ghost"
+                onClick={() =>
+                  setSetting(
+                    'minRegionStitches',
+                    Math.min(40, project.settings.minRegionStitches + 6),
+                  )
+                }
+              >
+                Zusammenführen
+              </Button>
+            </div>
           </div>
         ) : null}
 

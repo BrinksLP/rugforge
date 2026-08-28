@@ -86,6 +86,8 @@ interface EditorState {
   clearRecolor: (regionId: number) => void
   mergeColors: (from: number, into: number) => void
   unmergeColor: (index: number) => void
+  /** back to a clean slate: preset defaults, no recolours, no merges */
+  resetAdjustments: () => void
   recompute: () => Promise<void>
   undo: () => void
   redo: () => void
@@ -260,6 +262,21 @@ export const useEditor = create<EditorState>((set, get) => ({
       const next = { ...merges }
       delete next[index]
       return { ...pushHistory(s), project: { ...s.project, colorMerges: next } }
+    }),
+
+  resetAdjustments: () =>
+    set((s) => {
+      const preset = s.project.settings.preset
+      return {
+        ...pushHistory(s),
+        project: {
+          ...s.project,
+          settings: { preset, ...PRESETS[preset] },
+          recolors: {},
+          colorMerges: {},
+        },
+        patternStale: true,
+      }
     }),
 
   recompute: async () => {
