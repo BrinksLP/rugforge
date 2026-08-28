@@ -70,6 +70,10 @@ const slug = (s: string) =>
 
 /* ---- pattern PNG ------------------------------------------------ */
 
+/** cap the exported PNG's longer side (fits a 1080p/1440p projector
+ *  with zoom headroom without becoming a giant file) */
+const MAX_PNG_SIDE = 2560
+
 export function exportPatternPng(
   pattern: Pattern,
   project: Project,
@@ -81,7 +85,15 @@ export function exportPatternPng(
     sourceRaster?: ImageData | null
   },
 ) {
-  const cellPx = opts.cellPx ?? 22
+  const cellPx =
+    opts.cellPx ??
+    Math.max(
+      1,
+      Math.min(
+        22,
+        Math.floor(MAX_PNG_SIDE / Math.max(pattern.cols, pattern.rows)),
+      ),
+    )
   const bg = bgFor(pattern, project)
 
   if (opts.pathMode) {

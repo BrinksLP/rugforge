@@ -226,7 +226,8 @@ export function StepExport() {
         <Card className="p-5">
           <h3 className="text-sm font-bold">Vorlage als Bild</h3>
           <p className="mt-1 text-sm text-ink-soft">
-            PNG für Beamer oder Tablet.
+            PNG für Beamer oder Tablet — lange Seite ~2560 px. Farbnummern
+            erscheinen nur, wenn die Zellen groß genug werden.
           </p>
           <div className="mt-3">
             <Button onClick={() => exportPatternPng(pattern, project, pngOpts)}>
