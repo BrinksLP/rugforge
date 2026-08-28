@@ -39,19 +39,42 @@ export function StepFreistellen() {
     [crop, natural.w, natural.h],
   )
 
-  // (re)create the mask canvas when the image changes
+  const [hasAlpha, setHasAlpha] = useState(false)
+
+  // (re)create the mask canvas when the image changes. If the image
+  // already has a transparent background, seed the mask from its alpha
+  // channel (subject = opaque -> keep); otherwise keep everything.
   useEffect(() => {
     if (!img) return
     const c = document.createElement('canvas')
     c.width = img.naturalWidth
     c.height = img.naturalHeight
     const ctx = c.getContext('2d')!
-    ctx.fillStyle = '#fff'
-    ctx.fillRect(0, 0, c.width, c.height)
+    ctx.drawImage(img, 0, 0)
+
+    let transparent = 0
+    const px = ctx.getImageData(0, 0, c.width, c.height)
+    const a = px.data
+    for (let i = 3; i < a.length; i += 4) {
+      if (a[i] < 250) transparent++
+    }
+    const alphaBacked = transparent > a.length / 4 / 20 // > 5% see-through
+
+    for (let i = 0; i < a.length; i += 4) {
+      const keep = alphaBacked ? a[i + 3] >= 128 : true
+      a[i] = 255
+      a[i + 1] = 255
+      a[i + 2] = 255
+      a[i + 3] = keep ? 255 : 0
+    }
+    ctx.putImageData(px, 0, 0)
+
     maskRef.current = c
+    setHasAlpha(alphaBacked)
     setSegError(null)
+    setMask(c)
     force((n) => n + 1)
-  }, [img])
+  }, [img, setMask])
 
   if (!img) {
     return (
@@ -223,6 +246,29 @@ export function StepFreistellen() {
       ctx.globalCompositeOperation = 'source-over'
       ctx.clearRect(0, 0, c.width, c.height)
       ctx.drawImage(result, 0, 0)
+
+      // if the source already has a cut-out, union the model result with
+      // its opaque area — recovers parts u2netp misses on flat artwork
+      if (hasAlpha) {
+        const tmp = document.createElement('canvas')
+        tmp.width = c.width
+        tmp.height = c.height
+        tmp.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
+        const sd = tmp.getContext('2d')!.getImageData(0, 0, c.width, c.height)
+          .data
+        const md = ctx.getImageData(0, 0, c.width, c.height)
+        const m = md.data
+        for (let i = 0; i < m.length; i += 4) {
+          if (sd[i + 3] >= 220) {
+            m[i] = 255
+            m[i + 1] = 255
+            m[i + 2] = 255
+            m[i + 3] = 255
+          }
+        }
+        ctx.putImageData(md, 0, 0)
+      }
+
       setMask(c)
       setBrush(true)
       force((n) => n + 1)
@@ -367,10 +413,18 @@ export function StepFreistellen() {
         <hr className="my-4 border-line" />
 
         <h3 className="text-sm font-bold">Hintergrund entfernen</h3>
-        <p className="mt-1 text-sm text-ink-soft">
-          Stellt das Motiv im gewählten Rahmen automatisch frei. Läuft komplett
-          offline; der erste Aufruf lädt einmalig ein ~5 MB Modell.
-        </p>
+        {hasAlpha ? (
+          <p className="mt-1 text-sm text-ink-soft">
+            Das Bild ist schon freigestellt — die Maske übernimmt den deckenden
+            Bereich. „Automatisch freistellen" nur nötig, wenn noch Hintergrund
+            drin ist.
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-ink-soft">
+            Stellt das Motiv im gewählten Rahmen automatisch frei (für Fotos mit
+            Hintergrund). Läuft offline; erster Aufruf lädt einmalig ~5 MB.
+          </p>
+        )}
         <div className="mt-3 space-y-3">
           <Button onClick={autoMask} disabled={!!segBusy}>
             {segLabel}
