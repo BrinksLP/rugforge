@@ -48,7 +48,7 @@ export function StepPattern() {
   const [showGrid, setShowGrid] = useState(true)
   const [mirror, setMirror] = useState(false)
   const [selectedRegion, setSelectedRegion] = useState<number | null>(null)
-  const [view, setView] = useState<'grid' | 'path'>('grid')
+  const [view, setView] = useState<'grid' | 'path'>('path')
 
   // auto-build on entering the step / after changes
   useEffect(() => {

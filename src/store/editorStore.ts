@@ -54,6 +54,7 @@ export function newProject(now: number): Project {
     pathSmoothing: 1.2,
     setupProfile: { ...STANDARD_SETUP },
     businessProfile: { ...STANDARD_BUSINESS },
+    maxStep: 0,
     version: 1,
   }
 }
@@ -404,9 +405,13 @@ export const useEditor = create<EditorState>((set, get) => ({
     }),
 
   autosave: async () => {
-    const { project } = get()
+    const { project, maxStepReached } = get()
     if (!project.imageDataUrl) return
-    const stamped = { ...project, updatedAt: nowMs() }
+    const stamped = {
+      ...project,
+      updatedAt: nowMs(),
+      maxStep: Math.max(project.maxStep ?? 0, maxStepReached),
+    }
     set({ project: stamped })
     await saveProject(stamped)
   },

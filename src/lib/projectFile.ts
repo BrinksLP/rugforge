@@ -37,5 +37,6 @@ export async function importProjectFile(file: File): Promise<Project> {
   if (data.businessProfile && data.businessProfile.hoursPerM2 == null) {
     data.businessProfile.hoursPerM2 = 4
   }
+  if (typeof data.maxStep !== 'number') data.maxStep = data.imageDataUrl ? 4 : 0
   return data as Project
 }

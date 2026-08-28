@@ -153,6 +153,8 @@ export interface Project {
   pathSmoothing: number
   setupProfile: SetupProfile
   businessProfile: BusinessProfile
+  /** furthest wizard step reached (0..4) — for the "resume?" prompt */
+  maxStep: number
   /** schema version for future migrations */
   version: 1
 }

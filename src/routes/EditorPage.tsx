@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Stepper } from '../components/Stepper'
 import { Button } from '../components/ui'
 import { useEditor } from '../store/editorStore'
+import { listProjects } from '../lib/db'
+import type { Project } from '../types'
 import { StepImage } from './steps/StepImage'
 import { StepFreistellen } from './steps/StepFreistellen'
 import { StepSize } from './steps/StepSize'
 import { StepPattern } from './steps/StepPattern'
 import { StepExport } from './steps/StepExport'
+
+/** ask "resume?" at most once per app start */
+let resumeChecked = false
 
 export function EditorPage() {
   const step = useEditor((s) => s.step)
@@ -23,6 +28,30 @@ export function EditorPage() {
   const imageDataUrl = useEditor((s) => s.project.imageDataUrl)
   const hasSource = useEditor((s) => !!s.sourceImage)
   const rehydrateImage = useEditor((s) => s.rehydrateImage)
+  const load = useEditor((s) => s.load)
+  const maxStepReached = useEditor((s) => s.maxStepReached)
+
+  const [resume, setResume] = useState<Project | null>(null)
+
+  // scroll back to the top whenever the wizard step changes
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [step])
+
+  // on a fresh start, offer to resume the newest unfinished project
+  useEffect(() => {
+    if (resumeChecked) return
+    resumeChecked = true
+    if (useEditor.getState().project.imageDataUrl) return
+    void listProjects().then((all) => {
+      const cand = all.find(
+        (p) =>
+          p.imageDataUrl &&
+          (p.maxStep ?? (p.imageDataUrl ? 4 : 0)) < 4,
+      )
+      if (cand) setResume(cand)
+    })
+  }, [])
 
   // after loading a saved project the <img> element is gone — rebuild it
   useEffect(() => {
@@ -39,7 +68,7 @@ export function EditorPage() {
     window.clearTimeout(timer.current)
     timer.current = window.setTimeout(() => void autosave(), 1200)
     return () => window.clearTimeout(timer.current)
-  }, [autosave, hasImage, projectId, updatedAt, name])
+  }, [autosave, hasImage, projectId, updatedAt, name, maxStepReached])
 
   const savePoint = useCallback(() => void autosave(), [autosave])
 
@@ -58,8 +87,35 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', onKey)
   }, [undo, redo])
 
+  const STEP_LABELS = ['Bild', 'Freistellen', 'Größe', 'Vorlage', 'Export']
+
   return (
     <div>
+      {resume ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-line bg-accent-soft px-4 py-3 text-sm">
+          <span>
+            Unfertiges Projekt <b>{resume.name}</b> vom{' '}
+            {new Date(resume.updatedAt).toLocaleDateString('de-DE')} — zuletzt
+            bei Schritt „{STEP_LABELS[resume.maxStep ?? 0] ?? 'Bild'}".
+            Fortsetzen?
+          </span>
+          <div className="ml-auto flex gap-2">
+            <Button
+              onClick={() => {
+                load(resume)
+                useEditor.getState().goStep(resume.maxStep ?? 0)
+                setResume(null)
+              }}
+            >
+              Fortsetzen
+            </Button>
+            <Button variant="ghost" onClick={() => setResume(null)}>
+              Ignorieren
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="mb-4 flex items-center gap-3">
         <input
           value={name}
