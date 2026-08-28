@@ -31,9 +31,14 @@ describe('buildTuftPath', () => {
 
   it('traces one closed outline near the true perimeter', () => {
     expect(path.outline.length).toBeGreaterThanOrEqual(1)
-    // 10x10 cm square = 40 cm perimeter, minus a little from corner rounding
-    expect(path.outlineLenCm).toBeGreaterThan(34)
+    // 10x10 cm square = 40 cm perimeter, less a bit from corner rounding
+    expect(path.outlineLenCm).toBeGreaterThan(30)
     expect(path.outlineLenCm).toBeLessThan(41)
+  })
+
+  it('the outline is smoothed, not a per-cell staircase', () => {
+    // a 10-cell edge would be ~11 boundary points raw; smoothed is far fewer
+    expect(path.outline[0].length).toBeLessThan(40)
   })
 
   it('fills the region with vertical strokes', () => {

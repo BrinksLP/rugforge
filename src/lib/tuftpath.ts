@@ -8,7 +8,7 @@
  *
  *   region cells
  *     -> boundary trace (unit edges) -> closed loops
- *     -> Chaikin corner-cutting        (curvy outline, not a staircase)
+ *     -> RDP simplify + Chaikin corner-cutting  (curvy outline, no stairs)
  *     -> vertical scan-line fill in serpentine order, bottom pass first;
  *        connectors only where they stay inside the region (else pen up)
  *     -> outline length + fill length  = gun travel, in cm
@@ -70,6 +70,92 @@ function polylineLen(pts: Pt[]): number {
 function loopLen(loop: Pt[]): number {
   if (loop.length < 2) return 0
   return polylineLen([...loop, loop[0]])
+}
+
+/** how far (in cells) the simplified outline may stray from the staircase */
+const OUTLINE_EPS = 0.9
+const OUTLINE_SMOOTH = 3
+
+function perpDist(p: Pt, a: Pt, b: Pt): number {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const len = Math.hypot(dx, dy) || 1
+  return Math.abs((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / len
+}
+
+/** Ramer–Douglas–Peucker on an open polyline */
+function rdp(points: Pt[], eps: number): Pt[] {
+  if (points.length < 3) return points.slice()
+  const a = points[0]
+  const b = points[points.length - 1]
+  let idx = -1
+  let maxD = 0
+  for (let i = 1; i < points.length - 1; i++) {
+    const d = perpDist(points[i], a, b)
+    if (d > maxD) {
+      maxD = d
+      idx = i
+    }
+  }
+  if (maxD > eps && idx > 0) {
+    const left = rdp(points.slice(0, idx + 1), eps)
+    const right = rdp(points.slice(idx), eps)
+    return [...left.slice(0, -1), ...right]
+  }
+  return [a, b]
+}
+
+function sliceWrap(loop: Pt[], from: number, to: number): Pt[] {
+  const out: Pt[] = []
+  let i = from
+  while (true) {
+    out.push(loop[i])
+    if (i === to) break
+    i = (i + 1) % loop.length
+  }
+  return out
+}
+
+/** RDP on a closed loop. Split it into two arcs between the two points
+ *  that are farthest apart (never a zero-length base segment), simplify
+ *  each as an open polyline, then stitch back together. */
+function simplifyLoop(loop: Pt[], eps: number): Pt[] {
+  if (loop.length < 6) return loop.slice()
+
+  // one extreme: farthest from the centroid
+  let cx = 0
+  let cy = 0
+  for (const [x, y] of loop) {
+    cx += x
+    cy += y
+  }
+  cx /= loop.length
+  cy /= loop.length
+  let a = 0
+  let far = -1
+  for (let i = 0; i < loop.length; i++) {
+    const d = Math.hypot(loop[i][0] - cx, loop[i][1] - cy)
+    if (d > far) {
+      far = d
+      a = i
+    }
+  }
+  // the other: farthest from `a`
+  let b = a
+  far = -1
+  for (let i = 0; i < loop.length; i++) {
+    const d = Math.hypot(loop[i][0] - loop[a][0], loop[i][1] - loop[a][1])
+    if (d > far) {
+      far = d
+      b = i
+    }
+  }
+  if (a === b) return loop.slice()
+
+  const arc1 = rdp(sliceWrap(loop, a, b), eps)
+  const arc2 = rdp(sliceWrap(loop, b, a), eps)
+  // arc1 ends at b, arc2 starts at b and ends at a — drop both shared ends
+  return [...arc1, ...arc2.slice(1, -1)]
 }
 
 /** Chaikin corner-cutting on a closed loop */
@@ -274,7 +360,9 @@ export function buildTuftPath(
   for (const region of kept) {
     const rawOutline = traceOutline(cells, cols, rows, region.id)
     const outline = rawOutline.map((loop) =>
-      chaikin(loop, 2).map(([x, y]): Pt => [x * cellCm, y * cellCm]),
+      chaikin(simplifyLoop(loop, OUTLINE_EPS), OUTLINE_SMOOTH).map(
+        ([x, y]): Pt => [x * cellCm, y * cellCm],
+      ),
     )
     const outlineLenCm = outline.reduce((s, l) => s + loopLen(l), 0)
 
