@@ -91,6 +91,7 @@ export function NumberInput({
   max,
   step = 1,
   suffix,
+  disabled,
 }: {
   value: number
   onChange: (v: number) => void
@@ -98,6 +99,7 @@ export function NumberInput({
   max?: number
   step?: number
   suffix?: string
+  disabled?: boolean
 }) {
   return (
     <span className="flex items-center gap-2">
@@ -107,11 +109,12 @@ export function NumberInput({
         min={min}
         max={max}
         step={step}
+        disabled={disabled}
         onChange={(e) => {
           const v = parseFloat(e.target.value)
           if (!Number.isNaN(v)) onChange(v)
         }}
-        className="w-28 rounded-[8px] border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+        className="w-28 rounded-[8px] border border-line bg-surface px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-50"
       />
       {suffix ? <span className="text-ink-soft text-sm">{suffix}</span> : null}
     </span>

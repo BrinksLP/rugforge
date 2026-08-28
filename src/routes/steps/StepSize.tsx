@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Button, Card, Field, Info, NumberInput } from '../../components/ui'
 import { gridResolution } from '../../lib/calc'
 import { useEditor } from '../../store/editorStore'
@@ -13,13 +14,17 @@ export function StepSize() {
 
   const srcW = crop?.w ?? img?.naturalWidth ?? 0
   const srcH = crop?.h ?? img?.naturalHeight ?? 0
-  const srcAspect = srcH > 0 ? srcW / srcH : 1
-  const sizeAspect = size.heightCm > 0 ? size.widthCm / size.heightCm : 1
-  const aspectOff = Math.abs(srcAspect - sizeAspect) / sizeAspect > 0.06
+  const srcAspect = srcW > 0 && srcH > 0 ? srcW / srcH : 0
 
-  function matchAspect() {
-    setSize({ heightCm: Math.round((size.widthCm / srcAspect) * 10) / 10 })
-  }
+  const derivedH =
+    srcAspect > 0 ? Math.round((size.widthCm / srcAspect) * 10) / 10 : null
+
+  // keep the height locked to the crop's aspect ratio
+  useEffect(() => {
+    if (derivedH != null && Math.abs(derivedH - size.heightCm) > 0.05) {
+      setSize({ heightCm: derivedH })
+    }
+  }, [derivedH, size.heightCm, setSize])
 
   return (
     <div className="grid gap-6 md:grid-cols-[1fr_320px]">
@@ -40,13 +45,21 @@ export function StepSize() {
               suffix="cm"
             />
           </Field>
-          <Field label="Höhe" hint="Fertige Teppichhöhe in Zentimetern.">
+          <Field
+            label="Höhe"
+            hint={
+              srcAspect > 0
+                ? 'Folgt automatisch aus Breite × Seitenverhältnis des Ausschnitts.'
+                : 'Fertige Teppichhöhe in Zentimetern.'
+            }
+          >
             <NumberInput
               value={size.heightCm}
               onChange={(v) => setSize({ heightCm: v })}
               min={5}
               max={400}
               suffix="cm"
+              disabled={srcAspect > 0}
             />
           </Field>
           <Field
@@ -63,18 +76,6 @@ export function StepSize() {
             />
           </Field>
         </div>
-
-        {aspectOff ? (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-[10px] border border-[#e9d8b6] bg-[#fdf6e7] px-3 py-2 text-sm text-warn">
-            <span>
-              Seitenverhältnis weicht vom Bildausschnitt ab — das Motiv wird
-              verzerrt.
-            </span>
-            <Button variant="ghost" onClick={matchAspect}>
-              Höhe anpassen
-            </Button>
-          </div>
-        ) : null}
 
         <div className="mt-6">
           <Button onClick={() => goStep(3)}>Weiter → Vorlage</Button>
