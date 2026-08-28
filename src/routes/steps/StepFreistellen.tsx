@@ -140,6 +140,63 @@ export function StepFreistellen() {
     force((n) => n + 1)
   }
 
+  /** keep only the large connected blobs of the mask, drop specks
+   *  (leftover watermark bits, stray auto-mask fragments) */
+  function keepLargestBlobs() {
+    const c = maskRef.current
+    if (!c) return
+    const ctx = c.getContext('2d')!
+    const { width, height } = c
+    const d = ctx.getImageData(0, 0, width, height)
+    const a = d.data
+    const n = width * height
+    const label = new Int32Array(n).fill(-1)
+    const sizes: number[] = []
+    const stack: number[] = []
+    const kept = (p: number) => a[p * 4 + 3] >= 128
+
+    for (let i = 0; i < n; i++) {
+      if (!kept(i) || label[i] !== -1) continue
+      const id = sizes.length
+      let size = 0
+      stack.push(i)
+      label[i] = id
+      while (stack.length) {
+        const p = stack.pop()!
+        size++
+        const x = p % width
+        const y = (p / width) | 0
+        if (x > 0 && kept(p - 1) && label[p - 1] === -1) {
+          label[p - 1] = id
+          stack.push(p - 1)
+        }
+        if (x < width - 1 && kept(p + 1) && label[p + 1] === -1) {
+          label[p + 1] = id
+          stack.push(p + 1)
+        }
+        if (y > 0 && kept(p - width) && label[p - width] === -1) {
+          label[p - width] = id
+          stack.push(p - width)
+        }
+        if (y < height - 1 && kept(p + width) && label[p + width] === -1) {
+          label[p + width] = id
+          stack.push(p + width)
+        }
+      }
+      sizes.push(size)
+    }
+    if (sizes.length < 2) return
+    const maxSize = Math.max(...sizes)
+    const threshBlob = Math.max(64, maxSize * 0.1)
+    for (let i = 0; i < n; i++) {
+      const id = label[i]
+      if (id !== -1 && sizes[id] < threshBlob) a[i * 4 + 3] = 0
+    }
+    ctx.putImageData(d, 0, 0)
+    setMask(c)
+    force((k) => k + 1)
+  }
+
   async function autoMask() {
     if (!img || segBusy) return
     setSegError(null)
@@ -154,6 +211,7 @@ export function StepFreistellen() {
       ctx.globalCompositeOperation = 'source-over'
       ctx.clearRect(0, 0, c.width, c.height)
       ctx.drawImage(result, 0, 0)
+      keepLargestBlobs()
       setMask(c)
       setBrush(true)
       force((n) => n + 1)
@@ -180,13 +238,15 @@ export function StepFreistellen() {
     const ctx = c.getContext('2d')!
     const md = ctx.getImageData(0, 0, c.width, c.height)
     for (let i = 0; i < d.data.length; i += 4) {
-      const keep = d.data[i + 3] > 20
+      // "mostly opaque" — semi-transparent watermarks are dropped
+      const keep = d.data[i + 3] >= 128
       md.data[i] = 255
       md.data[i + 1] = 255
       md.data[i + 2] = 255
       md.data[i + 3] = keep ? 255 : 0
     }
     ctx.putImageData(md, 0, 0)
+    keepLargestBlobs()
     setMask(c)
     force((n) => n + 1)
   }
@@ -318,6 +378,13 @@ export function StepFreistellen() {
           <p className="text-xs text-ink-soft">
             Höher = enger am Motiv, mehr Hintergrund weg. Danach mit dem Pinsel
             nachbessern.
+          </p>
+          <Button variant="ghost" onClick={keepLargestBlobs}>
+            Kleine Reste entfernen
+          </Button>
+          <p className="text-xs text-ink-soft">
+            Behält nur die großen zusammenhängenden Flächen — löscht
+            Wasserzeichen-Punkte und Sprenkel.
           </p>
           {segError ? (
             <p className="rounded-[8px] bg-warn/15 px-3 py-2 text-xs text-warn">
