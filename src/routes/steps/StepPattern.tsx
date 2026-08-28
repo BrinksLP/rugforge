@@ -36,6 +36,7 @@ export function StepPattern() {
   const mergeColors = useEditor((s) => s.mergeColors)
   const unmergeColor = useEditor((s) => s.unmergeColor)
   const setBackground = useEditor((s) => s.setBackground)
+  const setPathSmoothing = useEditor((s) => s.setPathSmoothing)
   const resetAdjustments = useEditor((s) => s.resetAdjustments)
   const goStep = useEditor((s) => s.goStep)
 
@@ -140,12 +141,13 @@ export function StepPattern() {
       pattern && view === 'path'
         ? buildTuftPath(pattern, {
             skipRegion,
+            outlineEps: project.pathSmoothing,
             refine: sourceRaster
               ? { source: sourceRaster, colorLabOf, factor: 3 }
               : undefined,
           })
         : null,
-    [pattern, view, skipRegion, sourceRaster, colorLabOf],
+    [pattern, view, skipRegion, sourceRaster, colorLabOf, project.pathSmoothing],
   )
 
   const effIndex = useMemo(
@@ -320,6 +322,23 @@ export function StepPattern() {
               Füllung. Garn ist eine Schätzung aus Florhöhe (genauer mit dem
               Kalibriertest in Iteration 4).
             </p>
+
+            <div className="mt-3">
+              <Field
+                label={`Kontur glätten: ${project.pathSmoothing.toFixed(1)} Stiche`}
+                hint="Wie stark die Kontur begradigt wird. Höher = glattere Kurve, sitzt lockerer am Stichraster."
+              >
+                <input
+                  type="range"
+                  min={0.5}
+                  max={5}
+                  step={0.5}
+                  value={project.pathSmoothing}
+                  onChange={(e) => setPathSmoothing(+e.target.value)}
+                />
+              </Field>
+            </div>
+
             <ul className="mt-3 space-y-1.5 text-sm">
               {tuftPalette.map((c) => {
                 const cm = travel[c.index] ?? 0

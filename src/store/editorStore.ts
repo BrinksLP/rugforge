@@ -17,7 +17,13 @@ export type StepKey = (typeof STEPS)[number]
 
 type Snapshot = Pick<
   Project,
-  'crop' | 'size' | 'settings' | 'recolors' | 'colorMerges' | 'bgColors'
+  | 'crop'
+  | 'size'
+  | 'settings'
+  | 'recolors'
+  | 'colorMerges'
+  | 'bgColors'
+  | 'pathSmoothing'
 >
 
 function snap(p: Project): Snapshot {
@@ -28,6 +34,7 @@ function snap(p: Project): Snapshot {
     recolors: { ...p.recolors },
     colorMerges: { ...p.colorMerges },
     bgColors: [...p.bgColors],
+    pathSmoothing: p.pathSmoothing,
   }
 }
 
@@ -44,6 +51,7 @@ export function newProject(now: number): Project {
     recolors: {},
     colorMerges: {},
     bgColors: [],
+    pathSmoothing: 2,
     setupProfile: { ...STANDARD_SETUP },
     businessProfile: { ...STANDARD_BUSINESS },
     version: 1,
@@ -93,6 +101,8 @@ interface EditorState {
   unmergeColor: (index: number) => void
   /** mark / unmark a palette colour as "not tufted" (background) */
   setBackground: (index: number, on: boolean) => void
+  /** tufting-path outline smoothing, in stitches */
+  setPathSmoothing: (stitches: number) => void
   /** back to a clean slate: preset defaults, no recolours, no merges */
   resetAdjustments: () => void
   recompute: () => Promise<void>
@@ -127,6 +137,7 @@ export const useEditor = create<EditorState>((set, get) => ({
         ...p,
         colorMerges: p.colorMerges ?? {},
         bgColors: p.bgColors ?? [],
+        pathSmoothing: p.pathSmoothing ?? 2,
       },
       step: 0,
       maxStepReached: p.imageDataUrl ? 4 : 0,
@@ -279,6 +290,15 @@ export const useEditor = create<EditorState>((set, get) => ({
       delete next[index]
       return { ...pushHistory(s), project: { ...s.project, colorMerges: next } }
     }),
+
+  setPathSmoothing: (stitches) =>
+    set((s) => ({
+      ...pushHistory(s),
+      project: {
+        ...s.project,
+        pathSmoothing: Math.max(0.5, Math.min(5, stitches)),
+      },
+    })),
 
   setBackground: (index, on) =>
     set((s) => {

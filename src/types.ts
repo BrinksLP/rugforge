@@ -147,6 +147,8 @@ export interface Project {
    * resolve on read.
    */
   bgColors: number[]
+  /** tufting-path outline smoothing (RDP tolerance) in stitches */
+  pathSmoothing: number
   setupProfile: SetupProfile
   businessProfile: BusinessProfile
   /** schema version for future migrations */

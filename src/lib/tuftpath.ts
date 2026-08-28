@@ -73,6 +73,8 @@ export interface TuftOptions {
   skipRegion?: (regionId: number) => boolean
   /** trace outlines from an image-refined boundary instead of the raw grid */
   refine?: RefineInput
+  /** RDP tolerance for the outline, in stitches (default 2) */
+  outlineEps?: number
 }
 
 /* ---- geometry helpers ---------------------------------------- */
@@ -90,11 +92,12 @@ function loopLen(loop: Pt[]): number {
   return polylineLen([...loop, loop[0]])
 }
 
-/** how far (in stitches) the simplified outline may stray from the trace */
-const OUTLINE_EPS = 0.7
+/** default RDP tolerance in stitches — how far the smoothed outline may
+ *  leave the traced boundary. Higher = fewer bumps, looser fit. */
+const OUTLINE_EPS = 2
 /** Chaikin passes (subdivide corners) then binomial low-pass passes */
-const OUTLINE_CHAIKIN = 2
-const OUTLINE_LOWPASS = 3
+const OUTLINE_CHAIKIN = 4
+const OUTLINE_LOWPASS = 2
 
 /** [1,2,1]/4 low-pass on a closed loop — flattens sub-stitch wobble
  *  without rounding real corners as hard as more Chaikin would */
@@ -518,6 +521,7 @@ export function buildTuftPath(
 
   const skip = opts.skipRegion ?? (() => false)
   const kept = regions.filter((r) => !skip(r.id))
+  const eps = Math.max(0.1, opts.outlineEps ?? OUTLINE_EPS)
 
   const refined = opts.refine
     ? refineGrid(cells, cols, rows, opts.refine)
@@ -538,7 +542,7 @@ export function buildTuftPath(
     }
     const outline = rawOutline.map((loop) => {
       const stitchPts = loop.map(([x, y]): Pt => [x / div, y / div])
-      const simplified = simplifyLoop(stitchPts, OUTLINE_EPS)
+      const simplified = simplifyLoop(stitchPts, eps)
       const rounded = chaikin(simplified, OUTLINE_CHAIKIN)
       const smooth = smoothLoop(rounded, OUTLINE_LOWPASS)
       return smooth.map(([x, y]): Pt => [x * cellCm, y * cellCm])

@@ -87,6 +87,7 @@ export function exportPatternPng(
   if (opts.pathMode) {
     const plan = buildTuftPath(pattern, {
       skipRegion: bg.skipRegion,
+      outlineEps: project.pathSmoothing,
       refine: refineFor(pattern, project, opts.sourceRaster),
     })
     const cv = document.createElement('canvas')
@@ -274,6 +275,7 @@ function drawOverview(
   // tufting path length + yarn-from-travel estimate
   const plan = buildTuftPath(pattern, {
     skipRegion: bg.skipRegion,
+      outlineEps: project.pathSmoothing,
     refine: refineFor(pattern, project, sourceRaster),
   })
   const travelM = plan.totalTravelCm / 100

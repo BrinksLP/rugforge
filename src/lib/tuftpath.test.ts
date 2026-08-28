@@ -37,9 +37,21 @@ describe('buildTuftPath', () => {
     expect(path.outlineLenCm).toBeLessThan(41)
   })
 
-  it('the outline is smoothed, not a per-cell staircase', () => {
-    // a 10-cell edge would be ~11 boundary points raw; smoothed is far fewer
-    expect(path.outline[0].length).toBeLessThan(40)
+  it('the outline is smoothed — no sharp staircase corners', () => {
+    const loop = path.outline[0]
+    let maxTurn = 0
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[(i - 1 + loop.length) % loop.length]
+      const b = loop[i]
+      const c = loop[(i + 1) % loop.length]
+      const a1 = Math.atan2(b[1] - a[1], b[0] - a[0])
+      const a2 = Math.atan2(c[1] - b[1], c[0] - b[0])
+      let d = Math.abs(a2 - a1)
+      if (d > Math.PI) d = 2 * Math.PI - d
+      maxTurn = Math.max(maxTurn, d)
+    }
+    // a raw staircase turns 90° at every step; smoothed stays well under
+    expect(maxTurn).toBeLessThan(Math.PI / 4)
   })
 
   it('fills the region with vertical strokes', () => {
