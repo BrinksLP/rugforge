@@ -5,6 +5,7 @@
 
 import { isLightHex } from './color'
 import { effectiveColorIndex } from './pattern'
+import type { TuftPlan } from './tuftpath'
 import type { Pattern } from '../types'
 
 export interface RenderOpts {
@@ -130,4 +131,140 @@ export function renderToCanvas(p: Pattern, opts: RenderOpts): HTMLCanvasElement 
   cv.height = p.rows * opts.cellPx
   drawPattern(cv.getContext('2d')!, p, opts)
   return cv
+}
+
+/* ---- tufting-path view (Iteration 3) ------------------------- */
+
+export interface TuftDrawOpts {
+  cellPx: number
+  mirror: boolean
+  recolors: Record<number, number>
+  merges?: Record<number, number>
+  /** palette index to spotlight; others dimmed */
+  highlight?: number | null
+  /** number the regions in tufting order */
+  showOrder?: boolean
+}
+
+/** slightly darken a #rrggbb hex so strokes read on their own fill */
+function darken(hex: string, f = 0.72): string {
+  const n = parseInt(hex.slice(1), 16)
+  const r = Math.round(((n >> 16) & 255) * f)
+  const g = Math.round(((n >> 8) & 255) * f)
+  const b = Math.round((n & 255) * f)
+  return `rgb(${r},${g},${b})`
+}
+
+export function drawTuftPath(
+  ctx: CanvasRenderingContext2D,
+  p: Pattern,
+  plan: TuftPlan,
+  opts: TuftDrawOpts,
+): void {
+  const { cellPx, mirror, recolors, merges, highlight } = opts
+  const W = p.cols * cellPx
+  const H = p.rows * cellPx
+  const pxPerCm = cellPx / (p.cellSizeMm / 10)
+
+  ctx.save()
+  ctx.clearRect(0, 0, W, H)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, W, H)
+  if (mirror) {
+    ctx.translate(W, 0)
+    ctx.scale(-1, 1)
+  }
+
+  const colorOf = new Int32Array(p.regions.length)
+  for (const r of p.regions) colorOf[r.id] = effectiveColorIndex(r, recolors, merges)
+
+  // faint colour zones so you can still read the design
+  for (let y = 0; y < p.rows; y++) {
+    for (let x = 0; x < p.cols; x++) {
+      const rid = p.cells[y * p.cols + x]
+      if (rid < 0) continue
+      const col = p.palette[colorOf[rid]]
+      if (!col) continue
+      ctx.globalAlpha = 0.16
+      ctx.fillStyle = col.hex
+      ctx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx)
+    }
+  }
+  ctx.globalAlpha = 1
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+
+  const pathById = new Map(plan.paths.map((pp) => [pp.regionId, pp]))
+  const labels: { x: number; y: number; n: number }[] = []
+  let seq = 0
+  for (const rid of plan.order) {
+    const pp = pathById.get(rid)
+    if (!pp) continue
+    seq++
+    const ci = colorOf[rid]
+    const col = p.palette[ci]
+    if (!col) continue
+    const dim = highlight != null && highlight >= 0 && ci !== highlight
+    ctx.globalAlpha = dim ? 0.1 : 1
+    const stroke = darken(col.hex)
+
+    // fill serpentine (thin)
+    if (pp.fill.length > 1) {
+      ctx.strokeStyle = stroke
+      ctx.lineWidth = Math.max(1, cellPx * 0.16)
+      ctx.beginPath()
+      pp.fill.forEach(([cx, cy], i) => {
+        const X = cx * pxPerCm
+        const Y = cy * pxPerCm
+        if (i === 0) ctx.moveTo(X, Y)
+        else ctx.lineTo(X, Y)
+      })
+      ctx.stroke()
+    }
+
+    // outline (a bit thicker)
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = Math.max(1.6, cellPx * 0.34)
+    for (const loop of pp.outline) {
+      if (loop.length < 2) continue
+      ctx.beginPath()
+      loop.forEach(([cx, cy], i) => {
+        const X = cx * pxPerCm
+        const Y = cy * pxPerCm
+        if (i === 0) ctx.moveTo(X, Y)
+        else ctx.lineTo(X, Y)
+      })
+      ctx.closePath()
+      ctx.stroke()
+    }
+
+    if (opts.showOrder && cellPx >= 5 && !dim) {
+      const [minX, minY, maxX, maxY] = p.regions[rid].bbox
+      labels.push({
+        x: ((minX + maxX + 1) / 2) * cellPx,
+        y: ((minY + maxY + 1) / 2) * cellPx,
+        n: seq,
+      })
+    }
+  }
+
+  ctx.globalAlpha = 1
+  ctx.restore()
+
+  // numbers on top, in screen space (never mirrored)
+  if (labels.length) {
+    ctx.save()
+    ctx.font = `bold ${Math.max(10, Math.min(20, cellPx * 1.4))}px 'Inter', sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    for (const l of labels) {
+      const X = mirror ? W - l.x : l.x
+      ctx.lineWidth = 3
+      ctx.strokeStyle = '#ffffffcc'
+      ctx.strokeText(String(l.n), X, l.y)
+      ctx.fillStyle = '#1f2328'
+      ctx.fillText(String(l.n), X, l.y)
+    }
+    ctx.restore()
+  }
 }

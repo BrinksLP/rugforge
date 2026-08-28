@@ -7,9 +7,10 @@
  * ------------------------------------------------------------------ */
 
 import { jsPDF } from 'jspdf'
-import { renderToCanvas, type RenderOpts } from './render'
+import { drawTuftPath, renderToCanvas, type RenderOpts } from './render'
 import { areaByColor, resolveMergedColor } from './pattern'
-import { yarnEstimate } from './calc'
+import { yarnEstimate, yarnFromTravel } from './calc'
+import { buildTuftPath } from './tuftpath'
 import type { Pattern, Project } from '../types'
 
 function triggerDownload(dataUrl: string, filename: string) {
@@ -30,9 +31,31 @@ const slug = (s: string) =>
 export function exportPatternPng(
   pattern: Pattern,
   project: Project,
-  opts: Omit<RenderOpts, 'cellPx' | 'recolors' | 'merges'> & { cellPx?: number },
+  opts: Omit<RenderOpts, 'cellPx' | 'recolors' | 'merges'> & {
+    cellPx?: number
+    /** draw the tufting path instead of the stitch grid */
+    pathMode?: boolean
+  },
 ) {
   const cellPx = opts.cellPx ?? 22
+
+  if (opts.pathMode) {
+    const plan = buildTuftPath(pattern)
+    const cv = document.createElement('canvas')
+    cv.width = pattern.cols * cellPx
+    cv.height = pattern.rows * cellPx
+    drawTuftPath(cv.getContext('2d')!, pattern, plan, {
+      cellPx,
+      mirror: opts.mirror,
+      recolors: project.recolors,
+      merges: project.colorMerges,
+      highlight: null,
+      showOrder: true,
+    })
+    triggerDownload(cv.toDataURL('image/png'), `${slug(project.name)}-pfad.png`)
+    return
+  }
+
   const cv = renderToCanvas(pattern, {
     cellPx,
     showGrid: opts.showGrid,
@@ -189,6 +212,35 @@ function drawOverview(
     )
     y += 34
   }
+
+  // tufting path length + yarn-from-travel estimate
+  const plan = buildTuftPath(pattern)
+  const travelM = plan.totalTravelCm / 100
+  const travelYarn = yarnFromTravel({
+    travelCm: plan.totalTravelCm,
+    setup: project.setupProfile,
+  })
+  y += 6
+  ctx.fillStyle = '#1f2328'
+  ctx.font = "bold 20px 'Inter', sans-serif"
+  ctx.fillText('Tufting-Weg', 112, y + 22)
+  ctx.font = "18px 'Inter', sans-serif"
+  ctx.fillStyle = '#5b6470'
+  ctx.fillText(
+    `Gesamtstrecke (Kontur + Füllung): ~ ${travelM.toFixed(1)} m  ·  ` +
+      `Bahnabstand ${(plan.rowSpacingCm * 10).toFixed(0)} mm`,
+    112,
+    y + 48,
+  )
+  ctx.fillText(
+    `Garn nach Weg: ~ ${travelYarn.weightG.toFixed(0)} g` +
+      (Number.isFinite(travelYarn.lengthM)
+        ? `  ·  ~ ${travelYarn.lengthM.toFixed(0)} m`
+        : ''),
+    112,
+    y + 74,
+  )
+  y += 96
 
   y += 10
   ctx.fillStyle = '#5b6470'

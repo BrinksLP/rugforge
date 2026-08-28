@@ -6,6 +6,7 @@ import {
   gridResolution,
   rugAreaCm2,
   yarnEstimate,
+  yarnFromTravel,
 } from './calc'
 import type { SetupProfile } from '../types'
 
@@ -67,6 +68,59 @@ describe('yarnEstimate (uncalibrated)', () => {
       setup: { ...setup, pileHeightMm: 25 },
     }).weightG
     expect(tall).toBeGreaterThan(short)
+  })
+})
+
+describe('yarnFromTravel', () => {
+  it('zero travel is zero yarn', () => {
+    const r = yarnFromTravel({ travelCm: 0, setup })
+    expect(r.lengthM).toBe(0)
+    expect(r.weightG).toBe(0)
+    expect(r.calibrated).toBe(false)
+  })
+
+  it('scales linearly with travel', () => {
+    const a = yarnFromTravel({ travelCm: 1000, setup }).weightG
+    const b = yarnFromTravel({ travelCm: 2000, setup }).weightG
+    expect(b / a).toBeCloseTo(2, 5)
+  })
+
+  it('grows with pile height', () => {
+    const short = yarnFromTravel({
+      travelCm: 1000,
+      setup: { ...setup, pileHeightMm: 8 },
+    }).weightG
+    const tall = yarnFromTravel({
+      travelCm: 1000,
+      setup: { ...setup, pileHeightMm: 25 },
+    }).weightG
+    expect(tall).toBeGreaterThan(short)
+  })
+
+  it('is in the same ballpark as the area estimate for a solid area', () => {
+    // a solid area: fill travel ~= area * stitchesPerCm
+    const areaCm2 = 2000
+    const travelCm = areaCm2 * setup.stitchesPerCm
+    const viaArea = yarnEstimate({ areaCm2, setup }).lengthM
+    const viaTravel = yarnFromTravel({ travelCm, setup }).lengthM
+    expect(viaTravel).toBeGreaterThan(viaArea * 0.6)
+    expect(viaTravel).toBeLessThan(viaArea * 2)
+  })
+
+  it('uses the calibration factor when present', () => {
+    const s: SetupProfile = {
+      ...setup,
+      calibration: {
+        patchWidthCm: 10,
+        patchHeightCm: 10,
+        gramsUsed: 12,
+        pileHeightMm: 18,
+        factor: 0.12,
+      },
+    }
+    const r = yarnFromTravel({ travelCm: 500, setup: s, wasteFactor: 0 })
+    expect(r.calibrated).toBe(true)
+    expect(r.weightG).toBeGreaterThan(0)
   })
 })
 

@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Field, Info } from '../../components/ui'
 import { useEditor } from '../../store/editorStore'
-import { drawPattern } from '../../lib/render'
-import { areaByColor, resolveMergedColor } from '../../lib/pattern'
+import { drawPattern, drawTuftPath } from '../../lib/render'
+import {
+  areaByColor,
+  effectiveColorIndex,
+  resolveMergedColor,
+} from '../../lib/pattern'
+import { buildTuftPath, travelByColor } from '../../lib/tuftpath'
+import { yarnFromTravel } from '../../lib/calc'
 import type { PatternPreset } from '../../types'
 
 const PRESET_LABEL: Record<PatternPreset, string> = {
@@ -32,6 +38,7 @@ export function StepPattern() {
   const [showGrid, setShowGrid] = useState(true)
   const [mirror, setMirror] = useState(false)
   const [selectedRegion, setSelectedRegion] = useState<number | null>(null)
+  const [view, setView] = useState<'grid' | 'path'>('grid')
 
   // auto-build on entering the step / after changes
   useEffect(() => {
@@ -73,6 +80,25 @@ export function StepPattern() {
     [pattern, merges],
   )
 
+  const plan = useMemo(
+    () => (pattern && view === 'path' ? buildTuftPath(pattern) : null),
+    [pattern, view],
+  )
+
+  const effIndex = useMemo(
+    () =>
+      pattern
+        ? (rid: number) =>
+            effectiveColorIndex(pattern.regions[rid], project.recolors, merges)
+        : () => 0,
+    [pattern, project.recolors, merges],
+  )
+
+  const travel = useMemo(
+    () => (plan && pattern ? travelByColor(plan, pattern, effIndex) : []),
+    [plan, pattern, effIndex],
+  )
+
   // draw
   useEffect(() => {
     const cv = canvasRef.current
@@ -83,16 +109,28 @@ export function StepPattern() {
     cv.height = pattern.rows * cellPx
     cv.style.width = '100%'
     cv.style.height = 'auto'
-    drawPattern(cv.getContext('2d')!, pattern, {
-      cellPx,
-      showGrid,
-      showNumbers: cellPx >= 12,
-      mirror,
-      recolors: project.recolors,
-      merges,
-      highlight,
-    })
-  }, [pattern, showGrid, mirror, highlight, project.recolors, merges])
+    const ctx = cv.getContext('2d')!
+    if (view === 'path' && plan) {
+      drawTuftPath(ctx, pattern, plan, {
+        cellPx,
+        mirror,
+        recolors: project.recolors,
+        merges,
+        highlight,
+        showOrder: true,
+      })
+    } else {
+      drawPattern(ctx, pattern, {
+        cellPx,
+        showGrid,
+        showNumbers: cellPx >= 12,
+        mirror,
+        recolors: project.recolors,
+        merges,
+        highlight,
+      })
+    }
+  }, [pattern, plan, view, showGrid, mirror, highlight, project.recolors, merges])
 
   function onCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!pattern) return
@@ -122,14 +160,30 @@ export function StepPattern() {
             </Button>
           ))}
           <span className="mx-1 h-5 w-px bg-line" />
-          <label className="flex items-center gap-1.5 text-sm">
-            <input
-              type="checkbox"
-              checked={showGrid}
-              onChange={(e) => setShowGrid(e.target.checked)}
-            />
-            Raster
-          </label>
+          <div className="flex overflow-hidden rounded-[8px] border border-line text-sm">
+            <button
+              className={`px-3 py-1 ${view === 'grid' ? 'bg-accent text-white' : 'hover:bg-canvas'}`}
+              onClick={() => setView('grid')}
+            >
+              Raster
+            </button>
+            <button
+              className={`px-3 py-1 ${view === 'path' ? 'bg-accent text-white' : 'hover:bg-canvas'}`}
+              onClick={() => setView('path')}
+            >
+              Pfad
+            </button>
+          </div>
+          {view === 'grid' ? (
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={showGrid}
+                onChange={(e) => setShowGrid(e.target.checked)}
+              />
+              Gitter
+            </label>
+          ) : null}
           <label className="flex items-center gap-1.5 text-sm">
             <input
               type="checkbox"
@@ -180,6 +234,71 @@ export function StepPattern() {
       </Card>
 
       <div className="space-y-4">
+        {view === 'path' && plan && pattern ? (
+          <Card className="p-5">
+            <h3 className="text-sm font-bold">
+              Tufting-Pfad{' '}
+              <Info text="Kontur zuerst als Zaun, dann Füllbahnen von unten nach oben als durchgehende Serpentine. Zahlen = vorgeschlagene Reihenfolge, hell vor dunkel." />
+            </h3>
+            <p className="mt-1 text-xs text-ink-soft">
+              Bahnabstand {(plan.rowSpacingCm * 10).toFixed(0)} mm · Weg = Kontur +
+              Füllung. Garn ist eine Schätzung aus Florhöhe (genauer mit dem
+              Kalibriertest in Iteration 4).
+            </p>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              {activePalette.map((c) => {
+                const cm = travel[c.index] ?? 0
+                const { lengthM, weightG } = yarnFromTravel({
+                  travelCm: cm,
+                  setup: project.setupProfile,
+                })
+                return (
+                  <li key={c.index} className="flex items-center gap-3">
+                    <span
+                      className="h-5 w-5 shrink-0 rounded-[5px] border border-black/10"
+                      style={{ background: c.hex }}
+                    />
+                    <span className="font-semibold">{c.index + 1}</span>
+                    <span className="ml-auto text-ink-soft">
+                      {(cm / 100).toFixed(1)} m Weg
+                    </span>
+                    <span className="w-24 text-right text-ink-soft">
+                      ~{Number.isFinite(lengthM) ? lengthM.toFixed(0) : '–'} m ·{' '}
+                      {weightG.toFixed(0)} g
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+            <div className="mt-2 flex items-center gap-3 border-t border-line pt-2 text-sm font-bold">
+              <span>Summe</span>
+              <span className="ml-auto">
+                {(plan.totalTravelCm / 100).toFixed(1)} m Weg
+              </span>
+              <span className="w-24 text-right">
+                {activePalette
+                  .reduce(
+                    (s, c) =>
+                      s +
+                      yarnFromTravel({
+                        travelCm: travel[c.index] ?? 0,
+                        setup: project.setupProfile,
+                      }).weightG,
+                    0,
+                  )
+                  .toFixed(0)}{' '}
+                g
+              </span>
+            </div>
+            {plan.paths.some((p) => p.thin) ? (
+              <p className="mt-2 text-xs text-ink-soft">
+                {plan.paths.filter((p) => p.thin).length} sehr schmale Fläche(n)
+                werden nur von der Kontur abgedeckt (keine eigenen Füllbahnen).
+              </p>
+            ) : null}
+          </Card>
+        ) : null}
+
         <Card className="p-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold">Feineinstellung</h3>

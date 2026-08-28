@@ -18,6 +18,7 @@ export function StepExport() {
   const [grid, setGrid] = useState(true)
   const [numbers, setNumbers] = useState(true)
   const [mirror, setMirror] = useState(true) // tuft from the back → ON by default
+  const [pathMode, setPathMode] = useState(false)
 
   if (!pattern || stale) {
     return (
@@ -31,6 +32,7 @@ export function StepExport() {
   }
 
   const opts = { showGrid: grid, showNumbers: numbers, mirror }
+  const pngOpts = { ...opts, pathMode }
 
   return (
     <div className="grid gap-6 md:grid-cols-[300px_1fr]">
@@ -62,6 +64,15 @@ export function StepExport() {
             Gespiegelt
             <Info text="Beim Tuften arbeitest du von der Rückseite — Standard ist gespiegelt." />
           </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={pathMode}
+              onChange={(e) => setPathMode(e.target.checked)}
+            />
+            Tufting-Pfad
+            <Info text="Zeigt Kontur + Füllbahnen mit Reihenfolge-Nummern statt des Rasters (nur im PNG)." />
+          </label>
         </div>
         <p className="mt-4 text-xs text-ink-soft">
           Format: A4. Letter / A3 folgt später.
@@ -75,7 +86,7 @@ export function StepExport() {
             PNG für Beamer oder Tablet.
           </p>
           <div className="mt-3">
-            <Button onClick={() => exportPatternPng(pattern, project, opts)}>
+            <Button onClick={() => exportPatternPng(pattern, project, pngOpts)}>
               PNG herunterladen
             </Button>
           </div>

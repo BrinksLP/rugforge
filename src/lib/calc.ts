@@ -59,6 +59,45 @@ export function yarnEstimate(params: {
   return { lengthM, weightG, calibrated: false }
 }
 
+/**
+ * Yarn from actual gun travel (outline + fill path length) — Iteration 3.
+ *
+ * Along 1 cm of travel the gun makes ~stitches_per_cm penetrations, each
+ * pulling roughly 2 · pile_height of yarn into the backing; plus ~1 cm
+ * of yarn carried along the path itself.
+ *
+ *   yarn_length_cm = travel_cm · (1 + 2 · pile_cm · stitches_per_cm) · (1 + waste)
+ *
+ * The "2 ·" constant is the crude part; Iteration 4's calibration test
+ * replaces it with a measured value. Still an estimate: ±30–50 %.
+ */
+export function yarnFromTravel(params: {
+  travelCm: number
+  setup: SetupProfile
+  wasteFactor?: number
+}): { lengthM: number; weightG: number; calibrated: boolean } {
+  const { travelCm, setup } = params
+  const waste = params.wasteFactor ?? 0.15
+  const spc = setup.stitchesPerCm
+  const pileCm = setup.pileHeightMm / 10
+
+  if (setup.calibration) {
+    const c = setup.calibration
+    const scale = c.pileHeightMm > 0 ? setup.pileHeightMm / c.pileHeightMm : 1
+    // calibration factor is g/cm²; cm² covered per cm of travel ≈ row spacing = 1/spc
+    const gPerTravelCm = (c.factor / spc) * scale
+    const weightG = travelCm * gPerTravelCm * (1 + waste)
+    const lengthM = setup.runLengthMPerG ? weightG * setup.runLengthMPerG : NaN
+    return { lengthM, weightG, calibrated: true }
+  }
+
+  const yarnPerTravelCm = 1 + 2 * pileCm * spc
+  const lengthM = (travelCm * yarnPerTravelCm * (1 + waste)) / 100
+  const runLengthMPerG = setup.runLengthMPerG ?? 8
+  const weightG = lengthM / runLengthMPerG
+  return { lengthM, weightG, calibrated: false }
+}
+
 /** g/cm² from a calibration patch. */
 export function calibrationFactor(input: {
   patchWidthCm: number
