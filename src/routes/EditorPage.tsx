@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Stepper } from '../components/Stepper'
 import { Button } from '../components/ui'
 import { useEditor } from '../store/editorStore'
-import { listProjects } from '../lib/db'
+import { deleteProject, listProjects } from '../lib/db'
 import type { Project } from '../types'
 import { StepImage } from './steps/StepImage'
 import { StepFreistellen } from './steps/StepFreistellen'
@@ -52,6 +52,13 @@ export function EditorPage() {
       if (cand) setResume(cand)
     })
   }, [])
+
+  // started a fresh project instead of resuming -> drop the stale one
+  useEffect(() => {
+    if (!resume || !imageDataUrl || imageDataUrl === resume.imageDataUrl) return
+    void deleteProject(resume.id)
+    setResume(null)
+  }, [resume, imageDataUrl])
 
   // after loading a saved project the <img> element is gone — rebuild it
   useEffect(() => {
