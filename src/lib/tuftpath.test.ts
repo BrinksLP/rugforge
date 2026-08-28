@@ -36,7 +36,7 @@ describe('buildTuftPath', () => {
     expect(path.outlineLenCm).toBeLessThan(41)
   })
 
-  it('fills the region with a continuous polyline', () => {
+  it('fills the region with vertical strokes', () => {
     expect(path.fill.length).toBeGreaterThan(2)
     expect(path.fillLenCm).toBeGreaterThan(80)
     expect(path.thin).toBe(false)
@@ -47,6 +47,45 @@ describe('buildTuftPath', () => {
       path.outlineLenCm + path.fillLenCm,
       5,
     )
+  })
+
+  it('no fill stroke leaves the region (concave shape)', () => {
+    // 6x6 grid with a 2x2 hole in the middle
+    const cols = 6
+    const rows = 6
+    const cells = new Int32Array(cols * rows).fill(0)
+    for (let y = 2; y <= 3; y++)
+      for (let x = 2; x <= 3; x++) cells[y * cols + x] = -1
+    const pattern: Pattern = {
+      cols,
+      rows,
+      cells,
+      regions: [region(0, 0, [0, 0, 5, 5], cols * rows - 4)],
+      palette: [{ index: 0, hex: '#777777', lab: [50, 0, 0], name: 'x' }],
+      cellSizeMm: 10,
+    }
+    const p2 = buildTuftPath(pattern).paths[0]
+    const inside = (cx: number, cy: number) => {
+      const gx = Math.floor(cx)
+      const gy = Math.floor(cy)
+      return (
+        gx >= 0 &&
+        gy >= 0 &&
+        gx < cols &&
+        gy < rows &&
+        cells[gy * cols + gx] === 0
+      )
+    }
+    for (const seg of p2.fill) {
+      for (let i = 1; i < seg.length; i++) {
+        const [ax, ay] = seg[i - 1]
+        const [bx, by] = seg[i]
+        for (let t = 0; t <= 1; t += 0.2) {
+          // fill coords are cm; cellSizeMm 10 => 1 cm per cell
+          expect(inside(ax + (bx - ax) * t, ay + (by - ay) * t)).toBe(true)
+        }
+      }
+    }
   })
 
   it('reports the snapped row spacing', () => {

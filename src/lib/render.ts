@@ -225,17 +225,20 @@ export function drawTuftPath(
     const stroke = darken(col.hex)
 
     // fill serpentine (thin)
-    if (pp.fill.length > 1) {
+    if (pp.fill.length) {
       ctx.strokeStyle = stroke
       ctx.lineWidth = Math.max(1, cellPx * 0.16)
-      ctx.beginPath()
-      pp.fill.forEach(([cx, cy], i) => {
-        const X = cx * pxPerCm
-        const Y = cy * pxPerCm
-        if (i === 0) ctx.moveTo(X, Y)
-        else ctx.lineTo(X, Y)
-      })
-      ctx.stroke()
+      for (const seg of pp.fill) {
+        if (seg.length < 2) continue
+        ctx.beginPath()
+        seg.forEach(([cx, cy], i) => {
+          const X = cx * pxPerCm
+          const Y = cy * pxPerCm
+          if (i === 0) ctx.moveTo(X, Y)
+          else ctx.lineTo(X, Y)
+        })
+        ctx.stroke()
+      }
     }
 
     // outline (a bit thicker)

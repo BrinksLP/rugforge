@@ -9,8 +9,8 @@
  *   region cells
  *     -> boundary trace (unit edges) -> closed loops
  *     -> Chaikin corner-cutting        (curvy outline, not a staircase)
- *     -> vertical scan-line fill, stitched into ONE serpentine polyline
- *        starting at the bottom (gun runs upward first)
+ *     -> vertical scan-line fill in serpentine order, bottom pass first;
+ *        connectors only where they stay inside the region (else pen up)
  *     -> outline length + fill length  = gun travel, in cm
  *
  * Yarn amount from travel lives in lib/calc.ts (yarnFromTravel); the
@@ -32,8 +32,9 @@ export interface RegionPath {
   colorIndex: number
   /** closed loops in cm, outer first */
   outline: Pt[][]
-  /** one continuous fill polyline in cm ([] if the region is too thin) */
-  fill: Pt[]
+  /** fill strokes in cm — vertical passes plus the connectors that stay
+   *  inside the region. Separate strokes = pen lifted between them. */
+  fill: Pt[][]
   outlineLenCm: number
   fillLenCm: number
   /** covered by its outline alone — fill added little or nothing */
@@ -182,7 +183,13 @@ function bboxArea(loop: Pt[]): number {
   return (maxX - minX) * (maxY - minY)
 }
 
-/* ---- 2. fill: vertical scan lines -> one serpentine polyline -- */
+/* ---- 2. fill: vertical scan lines -> serpentine strokes ------- *
+ * Each maximal run of region cells in a scan column is one vertical
+ * pass. Consecutive passes (serpentine order) are joined by a connector
+ * ONLY when the straight connector stays inside the region — otherwise
+ * the pen lifts (a new stroke starts), so a fill line never crosses a
+ * gap, a concave notch or a neighbouring colour.
+ * ------------------------------------------------------------------ */
 
 function serpentineFill(
   cells: Int32Array,
@@ -190,8 +197,20 @@ function serpentineFill(
   rows: number,
   regionId: number,
   spacingCells: number,
-): Pt[] {
-  const inside = (x: number, y: number) => cells[y * cols + x] === regionId
+): Pt[][] {
+  const inside = (x: number, y: number) =>
+    x >= 0 && y >= 0 && x < cols && y < rows && cells[y * cols + x] === regionId
+  const insideAt = (px: number, py: number) =>
+    inside(Math.floor(px), Math.floor(py))
+  const connectorInside = (a: Pt, b: Pt) => {
+    const steps = Math.max(2, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) * 3))
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps
+      if (!insideAt(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t))
+        return false
+    }
+    return true
+  }
 
   const columns: { cx: number; segs: [number, number][] }[] = []
   const start = Math.floor(spacingCells / 2)
@@ -210,8 +229,9 @@ function serpentineFill(
     if (segs.length) columns.push({ cx, segs })
   }
 
-  const pts: Pt[] = []
+  const strokes: Pt[][] = []
   let up = true // first pass runs bottom -> top
+  let prevExit: Pt | null = null
   for (const col of columns) {
     const ordered = [...col.segs].sort((a, b) =>
       up ? b[1] - a[1] : a[0] - b[0],
@@ -219,15 +239,17 @@ function serpentineFill(
     for (const [s0, s1] of ordered) {
       const top: Pt = [col.cx + 0.5, s0 + 0.5]
       const bot: Pt = [col.cx + 0.5, s1 + 0.5]
-      if (up) {
-        pts.push(bot, top)
-      } else {
-        pts.push(top, bot)
+      const enter = up ? bot : top
+      const exit = up ? top : bot
+      if (prevExit && connectorInside(prevExit, enter)) {
+        strokes.push([prevExit, enter])
       }
+      strokes.push([enter, exit])
+      prevExit = exit
     }
     up = !up
   }
-  return pts
+  return strokes
 }
 
 /* ---- assemble ---------------------------------------------- */
@@ -257,8 +279,10 @@ export function buildTuftPath(
     const outlineLenCm = outline.reduce((s, l) => s + loopLen(l), 0)
 
     const rawFill = serpentineFill(cells, cols, rows, region.id, spacingCells)
-    const fill = rawFill.map(([x, y]): Pt => [x * cellCm, y * cellCm])
-    const fillLenCm = polylineLen(fill)
+    const fill = rawFill.map((stroke) =>
+      stroke.map(([x, y]): Pt => [x * cellCm, y * cellCm]),
+    )
+    const fillLenCm = fill.reduce((acc, s) => acc + polylineLen(s), 0)
 
     const thin = fillLenCm < outlineLenCm * 0.5
     totalTravelCm += outlineLenCm + fillLenCm
