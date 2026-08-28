@@ -263,7 +263,7 @@ export function StepFreistellen() {
       <Card className="p-6">
         <div
           ref={wrapRef}
-          className="relative select-none"
+          className="relative select-none overflow-hidden"
           style={{ width: displayW, height: displayH }}
           onPointerMove={(e) => {
             onCropPointerMove(e)
